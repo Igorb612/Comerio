@@ -323,8 +323,8 @@ async def generate_pdf(month: int):
         # Grid
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         
-        # Commessa column
-        ('ALIGN', (0, 2), (0, -1), 'LEFT'),
+        # Commessa column - CENTERED
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
         ('FONTSIZE', (0, 2), (0, -1), 7),
         
         # Totals column
