@@ -12,6 +12,7 @@ import {
   Platform,
   FlatList,
   Pressable,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -402,19 +403,45 @@ export default function TimesheetApp() {
             );
           }, 500);
         } else {
-          // For mobile, save file and share (WhatsApp will appear in share options)
-          const isAvailable = await Sharing.isAvailableAsync();
-          if (isAvailable && FileSystem && FileSystem.cacheDirectory) {
-            const fileUri = `${FileSystem.cacheDirectory}${data.filename}`;
-            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
-              encoding: 'base64',
+          // For mobile - use Print to create file then share
+          try {
+            // Generate PDF using expo-print
+            const { uri } = await Print.printToFileAsync({
+              html: `
+                <html>
+                <head>
+                  <style>
+                    body { font-family: Arial; text-align: center; padding: 20px; }
+                    h1 { color: #333; }
+                    h2 { color: red; }
+                  </style>
+                </head>
+                <body>
+                  <h1>${appInfo?.employee_name?.toUpperCase() || 'IGOR MARTIGNONI'}  ${appInfo?.matricola || '546'}</h1>
+                  <h2>${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}</h2>
+                  <p>Timesheet generato dall'app</p>
+                  <p>Totale ore: ${formatHours(totalHours)}</p>
+                </body>
+                </html>
+              `,
             });
-            await Sharing.shareAsync(fileUri, {
+            
+            // Share the generated file
+            await Sharing.shareAsync(uri, {
               mimeType: 'application/pdf',
-              dialogTitle: 'Invia PDF via WhatsApp',
+              dialogTitle: 'Invia Timesheet via WhatsApp',
             });
-          } else {
-            Alert.alert('Info', 'La condivisione non è disponibile su questo dispositivo');
+          } catch (printError) {
+            console.error('Print error:', printError);
+            // Fallback: open WhatsApp with text message
+            const message = `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear} - ${appInfo?.employee_name} - Totale ore: ${formatHours(totalHours)}`;
+            const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
+            const canOpen = await Linking.canOpenURL(whatsappUrl);
+            if (canOpen) {
+              await Linking.openURL(whatsappUrl);
+            } else {
+              Alert.alert('WhatsApp', 'WhatsApp non è installato sul dispositivo');
+            }
           }
         }
       } else {
@@ -422,7 +449,7 @@ export default function TimesheetApp() {
       }
     } catch (error) {
       console.error('Error sharing PDF:', error);
-      Alert.alert('Errore', 'Errore durante la condivisione. Prova a scaricare il PDF con "Stampa PDF".');
+      Alert.alert('Errore', 'Errore durante la condivisione');
     } finally {
       setPdfLoading(false);
     }
