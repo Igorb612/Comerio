@@ -403,22 +403,27 @@ export default function TimesheetApp() {
             );
           }, 500);
         } else {
-          // For mobile - download PDF from server and share
+          // For mobile - download PDF directly from server
           try {
-            // Download the PDF to device cache using the download endpoint
-            const downloadUrl = `${API_URL}/api/timesheets/${selectedMonth}/pdf/download`;
-            const fileUri = FileSystem.cacheDirectory + data.filename;
+            const filename = data.filename || `timesheet_${selectedMonth}_${currentYear}.pdf`;
+            const fileUri = FileSystem.cacheDirectory + filename;
             
-            // Write base64 to file
-            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
+            // Download PDF directly from the download endpoint
+            const downloadResult = await FileSystem.downloadAsync(
+              `${API_URL}/api/timesheets/${selectedMonth}/pdf/download`,
+              fileUri
+            );
             
-            // Share the file
-            await Sharing.shareAsync(fileUri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Invia Timesheet via WhatsApp',
-            });
+            if (downloadResult.status === 200) {
+              // Share the downloaded PDF file
+              await Sharing.shareAsync(downloadResult.uri, {
+                mimeType: 'application/pdf',
+                dialogTitle: 'Invia Timesheet via WhatsApp',
+                UTI: 'com.adobe.pdf',
+              });
+            } else {
+              throw new Error('Download failed');
+            }
           } catch (fileError) {
             console.error('File error:', fileError);
             // Fallback: open WhatsApp with text message
@@ -429,7 +434,7 @@ export default function TimesheetApp() {
               await Linking.openURL(whatsappUrl);
               Alert.alert('Info', 'Per inviare il PDF completo, usa "Stampa PDF" e condividi il file scaricato.');
             } else {
-              Alert.alert('Errore', 'WhatsApp non è installato. Usa "Stampa PDF" per scaricare il file.');
+              Alert.alert('Errore', 'Usa "Stampa PDF" per scaricare e condividere il file.');
             }
           }
         }
