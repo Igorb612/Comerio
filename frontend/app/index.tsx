@@ -391,49 +391,42 @@ export default function TimesheetApp() {
     dayNamesRow += '<th style="width:45px;background:#e0e0e0;padding:4px;font-size:8px;">Tot.Ore</th>';
     dayNumbersRow += '<th style="background:#e0e0e0;"></th>';
     
-    // Build data rows
+    // Build data rows - ONLY rows with actual data
     let dataRows = '';
     let dailyTotals = new Array(daysInMonth).fill(0);
     
     rows.forEach(row => {
-      if (row.commessa.trim()) {
-        let rowHtml = `<td style="text-align:center;padding:3px;font-size:7px;border:1px solid #ccc;">${row.commessa}</td>`;
-        let rowTotal = 0;
-        
-        for (let d = 0; d < daysInMonth; d++) {
-          const hours = row.hours[d] || 0;
-          const display = hours > 0 ? hours.toString().replace('.', ',') : '';
-          rowHtml += `<td style="text-align:center;padding:2px;font-size:7px;border:1px solid #ccc;">${display}</td>`;
-          rowTotal += hours;
-          dailyTotals[d] += hours;
-        }
-        
-        rowHtml += `<td style="text-align:center;padding:3px;font-size:8px;font-weight:bold;border:1px solid #ccc;background:#f5f5f5;">${rowTotal > 0 ? rowTotal.toString().replace('.', ',') : '0'}</td>`;
-        dataRows += `<tr>${rowHtml}</tr>`;
+      // Check if row has any hours
+      const rowTotal = row.hours.slice(0, daysInMonth).reduce((sum, h) => sum + (h || 0), 0);
+      if (rowTotal === 0 || !row.commessa.trim()) {
+        return; // Skip empty rows
       }
+      
+      let rowHtml = `<td style="text-align:center;padding:3px;font-size:7px;border:1px solid #ccc;">${row.commessa}</td>`;
+      
+      for (let d = 0; d < daysInMonth; d++) {
+        const hours = row.hours[d] || 0;
+        const display = hours > 0 ? hours.toString().replace('.', ',') : '';
+        rowHtml += `<td style="text-align:center;padding:2px;font-size:7px;border:1px solid #ccc;">${display}</td>`;
+        dailyTotals[d] += hours;
+      }
+      
+      // Total - show only if > 0
+      rowHtml += `<td style="text-align:center;padding:3px;font-size:8px;font-weight:bold;border:1px solid #ccc;background:#f5f5f5;">${rowTotal > 0 ? rowTotal.toString().replace('.', ',') : ''}</td>`;
+      dataRows += `<tr>${rowHtml}</tr>`;
     });
     
-    // Add empty rows if needed
-    const minRows = 15;
-    const currentRows = rows.filter(r => r.commessa.trim()).length;
-    for (let i = currentRows; i < minRows; i++) {
-      let emptyRow = '<td style="padding:3px;border:1px solid #ccc;">&nbsp;</td>';
-      for (let d = 0; d < daysInMonth; d++) {
-        emptyRow += '<td style="border:1px solid #ccc;">&nbsp;</td>';
-      }
-      emptyRow += '<td style="border:1px solid #ccc;background:#f5f5f5;">0</td>';
-      dataRows += `<tr>${emptyRow}</tr>`;
-    }
+    // NO empty rows added
     
-    // Build totals row
+    // Build totals row - empty instead of 0
     let totalsRow = '<td style="text-align:center;padding:3px;font-size:8px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">TOTALE</td>';
     let grandTotal = 0;
     for (let d = 0; d < daysInMonth; d++) {
       const total = dailyTotals[d];
       grandTotal += total;
-      totalsRow += `<td style="text-align:center;padding:2px;font-size:7px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">${total > 0 ? total.toString().replace('.', ',') : '0'}</td>`;
+      totalsRow += `<td style="text-align:center;padding:2px;font-size:7px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">${total > 0 ? total.toString().replace('.', ',') : ''}</td>`;
     }
-    totalsRow += `<td style="text-align:center;padding:3px;font-size:9px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">${grandTotal.toString().replace('.', ',')}</td>`;
+    totalsRow += `<td style="text-align:center;padding:3px;font-size:9px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">${grandTotal > 0 ? grandTotal.toString().replace('.', ',') : ''}</td>`;
     
     return `
       <!DOCTYPE html>

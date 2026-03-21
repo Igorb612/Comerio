@@ -252,38 +252,36 @@ async def generate_pdf(month: int):
         day_numbers_row.append(f"{day:02d}")
     day_numbers_row.append("")
     
-    # Data rows
+    # Data rows - only include rows with actual data
     data_rows = []
     daily_totals = [0.0] * num_days
     
     if timesheet and timesheet.get("rows"):
         for row in timesheet["rows"]:
+            # Check if row has any hours > 0
+            row_total = sum(h for h in row["hours"][:num_days] if h and h > 0)
+            if row_total == 0:
+                continue  # Skip empty rows
+                
             row_data = [row["commessa"]]
-            row_total = 0.0
             for i, hours in enumerate(row["hours"][:num_days]):
                 if hours and hours > 0:
                     # Format with comma for Italian
                     formatted = str(hours).replace('.', ',')
                     row_data.append(formatted)
-                    row_total += hours
                     daily_totals[i] += hours
                 else:
                     row_data.append("")
             # Fill remaining days if less than num_days
             while len(row_data) < num_days + 1:
                 row_data.append("")
-            # Total hours for this row
-            row_data.append(str(row_total).replace('.', ',') if row_total > 0 else "0")
+            # Total hours for this row - show only if > 0
+            row_data.append(str(row_total).replace('.', ',') if row_total > 0 else "")
             data_rows.append(row_data)
     
-    # Add empty rows to fill the table (at least 20 rows)
-    min_rows = 20
-    while len(data_rows) < min_rows:
-        empty_row = [""] * (num_days + 2)
-        empty_row[-1] = "0"
-        data_rows.append(empty_row)
+    # NO empty rows - only show actual data
     
-    # Daily totals row
+    # Daily totals row - show empty instead of 0
     totals_row = [""]
     grand_total = 0.0
     for total in daily_totals:
@@ -291,8 +289,8 @@ async def generate_pdf(month: int):
             totals_row.append(str(total).replace('.', ','))
             grand_total += total
         else:
-            totals_row.append("0")
-    totals_row.append(str(grand_total).replace('.', ','))
+            totals_row.append("")
+    totals_row.append(str(grand_total).replace('.', ',') if grand_total > 0 else "")
     
     # Combine all rows
     table_data = [day_names_row, day_numbers_row] + data_rows + [totals_row]
