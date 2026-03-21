@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
-  Dimensions,
   FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -47,7 +46,14 @@ interface AppInfo {
   months: string[];
 }
 
-const ITALIAN_DAYS = ['Lu', 'Ma', 'Me', 'Gi', 'Ve', 'Sa', 'Do'];
+interface DayEntry {
+  day: number;
+  commessa: string;
+  hours: number;
+}
+
+const ITALIAN_DAYS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+const ITALIAN_DAYS_SHORT = ['Do', 'Lu', 'Ma', 'Me', 'Gi', 'Ve', 'Sa'];
 const ITALIAN_MONTHS = [
   'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
   'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'
@@ -57,32 +63,36 @@ const getDaysInMonth = (month: number, year: number): number => {
   return new Date(year, month, 0).getDate();
 };
 
-const getDayOfWeek = (day: number, month: number, year: number): number => {
+const getDayOfWeekName = (day: number, month: number, year: number): string => {
   const date = new Date(year, month - 1, day);
-  const dow = date.getDay();
-  return dow === 0 ? 6 : dow - 1; // Convert Sunday=0 to Monday=0 format
+  return ITALIAN_DAYS[date.getDay()];
 };
 
 const isWeekend = (day: number, month: number, year: number): boolean => {
-  const dow = getDayOfWeek(day, month, year);
-  return dow >= 5; // Saturday (5) or Sunday (6)
+  const date = new Date(year, month - 1, day);
+  const dow = date.getDay();
+  return dow === 0 || dow === 6;
 };
 
 export default function TimesheetApp() {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
-  const [timesheet, setTimesheet] = useState<Timesheet | null>(null);
   const [rows, setRows] = useState<TimesheetRow[]>([]);
   const [commesse, setCommesse] = useState<Commessa[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showCommessaPicker, setShowCommessaPicker] = useState(false);
+  const [showDayPicker, setShowDayPicker] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [archivedTimesheets, setArchivedTimesheets] = useState<Timesheet[]>([]);
-  const [currentEditingRow, setCurrentEditingRow] = useState<number | null>(null);
-  const [newCommessaInput, setNewCommessaInput] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+
+  // Entry form state
+  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
+  const [selectedCommessa, setSelectedCommessa] = useState<string>('');
+  const [hoursInput, setHoursInput] = useState<string>('');
+  const [newCommessaInput, setNewCommessaInput] = useState('');
 
   const currentYear = appInfo?.current_year || 2025;
   const numDays = getDaysInMonth(selectedMonth, currentYear);
@@ -96,6 +106,10 @@ export default function TimesheetApp() {
   // Fetch timesheet when month changes
   useEffect(() => {
     fetchTimesheet();
+    // Reset selected day if it exceeds days in new month
+    if (selectedDay > getDaysInMonth(selectedMonth, currentYear)) {
+      setSelectedDay(1);
+    }
   }, [selectedMonth]);
 
   const fetchAppInfo = async () => {
@@ -125,19 +139,15 @@ export default function TimesheetApp() {
       if (response.ok) {
         const data = await response.json();
         if (data) {
-          setTimesheet(data);
           setRows(data.rows || []);
         } else {
-          setTimesheet(null);
           setRows([]);
         }
       } else {
-        setTimesheet(null);
         setRows([]);
       }
     } catch (error) {
       console.error('Error fetching timesheet:', error);
-      setTimesheet(null);
       setRows([]);
     } finally {
       setLoading(false);
@@ -154,7 +164,7 @@ export default function TimesheetApp() {
     }
   };
 
-  const saveTimesheet = async () => {
+  const saveTimesheet = async (newRows: TimesheetRow[]) => {
     setSaving(true);
     try {
       const response = await fetch(`${API_URL}/api/timesheets`, {
@@ -162,92 +172,129 @@ export default function TimesheetApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           month: selectedMonth,
-          rows: rows.filter(r => r.commessa.trim() !== '')
+          rows: newRows.filter(r => r.commessa.trim() !== '')
         })
       });
       if (response.ok) {
-        const data = await response.json();
-        setTimesheet(data);
-        await fetchCommesse(); // Refresh commesse list
-        Alert.alert('Salvato', 'Timesheet salvato con successo!');
+        await fetchCommesse();
+        return true;
       }
+      return false;
     } catch (error) {
       console.error('Error saving timesheet:', error);
-      Alert.alert('Errore', 'Errore durante il salvataggio');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const addRow = () => {
-    const newRow: TimesheetRow = {
-      commessa: '',
-      hours: Array(31).fill(0)
-    };
-    setRows([...rows, newRow]);
+  const addEntry = async () => {
+    if (!selectedCommessa.trim()) {
+      Alert.alert('Errore', 'Seleziona una commessa');
+      return;
+    }
+    
+    const hours = parseFloat(hoursInput.replace(',', '.')) || 0;
+    if (hours <= 0) {
+      Alert.alert('Errore', 'Inserisci le ore lavorate');
+      return;
+    }
+
+    // Find or create row for this commessa
+    let newRows = [...rows];
+    let rowIndex = newRows.findIndex(r => r.commessa === selectedCommessa);
+    
+    if (rowIndex === -1) {
+      // Create new row
+      newRows.push({
+        commessa: selectedCommessa,
+        hours: Array(31).fill(0)
+      });
+      rowIndex = newRows.length - 1;
+    }
+
+    // Update hours for the selected day
+    newRows[rowIndex].hours[selectedDay - 1] = hours;
+    
+    // Save to backend
+    const success = await saveTimesheet(newRows);
+    if (success) {
+      setRows(newRows);
+      setHoursInput('');
+      Alert.alert('Salvato', `${hours.toString().replace('.', ',')} ore per ${selectedCommessa} il giorno ${selectedDay}`);
+    } else {
+      Alert.alert('Errore', 'Errore durante il salvataggio');
+    }
   };
 
-  const updateCommessa = (index: number, commessa: string) => {
-    const newRows = [...rows];
-    newRows[index].commessa = commessa;
-    setRows(newRows);
-  };
-
-  const updateHours = (rowIndex: number, dayIndex: number, value: string) => {
-    const newRows = [...rows];
-    // Convert comma to dot for parsing, then store as number
-    const numValue = parseFloat(value.replace(',', '.')) || 0;
-    newRows[rowIndex].hours[dayIndex] = numValue;
-    setRows(newRows);
-  };
-
-  const removeRow = (index: number) => {
+  const removeEntry = async (commessa: string, day: number) => {
     Alert.alert(
       'Conferma',
-      'Vuoi eliminare questa riga?',
+      `Vuoi eliminare le ore di "${commessa}" del giorno ${day}?`,
       [
         { text: 'Annulla', style: 'cancel' },
-        { text: 'Elimina', style: 'destructive', onPress: () => {
-          const newRows = rows.filter((_, i) => i !== index);
-          setRows(newRows);
-        }}
+        { 
+          text: 'Elimina', 
+          style: 'destructive', 
+          onPress: async () => {
+            let newRows = [...rows];
+            const rowIndex = newRows.findIndex(r => r.commessa === commessa);
+            if (rowIndex !== -1) {
+              newRows[rowIndex].hours[day - 1] = 0;
+              
+              // Remove row if all hours are 0
+              const totalHours = newRows[rowIndex].hours.reduce((sum, h) => sum + h, 0);
+              if (totalHours === 0) {
+                newRows = newRows.filter((_, i) => i !== rowIndex);
+              }
+              
+              const success = await saveTimesheet(newRows);
+              if (success) {
+                setRows(newRows);
+              }
+            }
+          }
+        }
       ]
     );
   };
 
-  const calculateRowTotal = (row: TimesheetRow): number => {
-    return row.hours.slice(0, numDays).reduce((sum, h) => sum + (h || 0), 0);
+  // Get all entries for current month, sorted by day
+  const getMonthEntries = (): DayEntry[] => {
+    const entries: DayEntry[] = [];
+    rows.forEach(row => {
+      row.hours.forEach((hours, index) => {
+        if (hours > 0 && index < numDays) {
+          entries.push({
+            day: index + 1,
+            commessa: row.commessa,
+            hours: hours
+          });
+        }
+      });
+    });
+    return entries.sort((a, b) => a.day - b.day);
   };
 
-  const calculateDayTotal = (dayIndex: number): number => {
-    return rows.reduce((sum, row) => sum + (row.hours[dayIndex] || 0), 0);
+  const calculateTotalHours = (): number => {
+    return rows.reduce((sum, row) => {
+      return sum + row.hours.slice(0, numDays).reduce((s, h) => s + h, 0);
+    }, 0);
   };
 
   const formatHours = (value: number): string => {
-    if (value === 0) return '';
+    if (value === 0) return '0';
     return value.toString().replace('.', ',');
   };
 
   const handlePreviewPDF = async () => {
     setPdfLoading(true);
     try {
-      // First save the current data
-      await saveTimesheet();
-      
       const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
-        const htmlContent = `
-          <html>
-            <body style="margin:0;padding:0;">
-              <embed src="data:application/pdf;base64,${data.pdf_base64}" type="application/pdf" width="100%" height="100%">
-            </body>
-          </html>
-        `;
-        
         if (Platform.OS === 'web') {
-          // Open PDF in new tab for web
           const byteCharacters = atob(data.pdf_base64);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
@@ -274,15 +321,11 @@ export default function TimesheetApp() {
   const handleDownloadPDF = async () => {
     setPdfLoading(true);
     try {
-      // First save the current data
-      await saveTimesheet();
-      
       const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
         if (Platform.OS === 'web') {
-          // Download for web
           const byteCharacters = atob(data.pdf_base64);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
@@ -296,10 +339,7 @@ export default function TimesheetApp() {
           link.download = data.filename;
           link.click();
         } else {
-          // Share for mobile
-          const fileUri = `${Print.printToFileAsync ? '' : 'file://'}${data.filename}`;
           if (await Sharing.isAvailableAsync()) {
-            // Create a temporary file and share
             const result = await Print.printToFileAsync({
               html: `<html><body><p>PDF</p></body></html>`,
               base64: false
@@ -318,18 +358,15 @@ export default function TimesheetApp() {
     }
   };
 
-  const selectCommessaForRow = (commessa: string) => {
-    if (currentEditingRow !== null) {
-      updateCommessa(currentEditingRow, commessa);
-      setShowCommessaPicker(false);
-      setCurrentEditingRow(null);
-      setNewCommessaInput('');
-    }
+  const selectCommessa = (commessa: string) => {
+    setSelectedCommessa(commessa);
+    setShowCommessaPicker(false);
+    setNewCommessaInput('');
   };
 
   const addNewCommessa = () => {
     if (newCommessaInput.trim()) {
-      selectCommessaForRow(newCommessaInput.trim());
+      selectCommessa(newCommessaInput.trim());
     }
   };
 
@@ -342,6 +379,9 @@ export default function TimesheetApp() {
     setSelectedMonth(month);
     setShowArchive(false);
   };
+
+  const monthEntries = getMonthEntries();
+  const totalHours = calculateTotalHours();
 
   if (loading && !appInfo) {
     return (
@@ -358,168 +398,177 @@ export default function TimesheetApp() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity
-            style={styles.monthButton}
-            onPress={() => setShowMonthPicker(true)}
-          >
-            <Text style={styles.monthText}>
-              {ITALIAN_MONTHS[selectedMonth - 1]} {currentYear}
-            </Text>
-            <Ionicons name="chevron-down" size={20} color="#333" />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.monthButton}
+          onPress={() => setShowMonthPicker(true)}
+        >
+          <Ionicons name="calendar" size={24} color="#2196F3" />
+          <Text style={styles.monthText}>
+            {ITALIAN_MONTHS[selectedMonth - 1]} {currentYear}
+          </Text>
+          <Ionicons name="chevron-down" size={20} color="#666" />
+        </TouchableOpacity>
         <View style={styles.headerRight}>
           <Text style={styles.employeeName}>{appInfo?.employee_name}</Text>
           <Text style={styles.matricola}>{appInfo?.matricola}</Text>
         </View>
       </View>
 
-      {/* Toolbar */}
-      <View style={styles.toolbar}>
-        <TouchableOpacity style={styles.toolButton} onPress={addRow}>
-          <Ionicons name="add-circle" size={24} color="#4CAF50" />
-          <Text style={styles.toolButtonText}>Aggiungi Riga</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.toolButton} onPress={saveTimesheet} disabled={saving}>
-          <Ionicons name="save" size={24} color="#2196F3" />
-          <Text style={styles.toolButtonText}>{saving ? 'Salvataggio...' : 'Salva'}</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.toolButton} onPress={handlePreviewPDF} disabled={pdfLoading}>
-          <Ionicons name="eye" size={24} color="#FF9800" />
-          <Text style={styles.toolButtonText}>Anteprima</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.toolButton} onPress={handleDownloadPDF} disabled={pdfLoading}>
-          <Ionicons name="download" size={24} color="#9C27B0" />
-          <Text style={styles.toolButtonText}>Stampa PDF</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.toolButton} onPress={openArchive}>
-          <Ionicons name="archive" size={24} color="#607D8B" />
-          <Text style={styles.toolButtonText}>Archivio</Text>
-        </TouchableOpacity>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2196F3" />
-        </View>
-      ) : (
-        <ScrollView style={styles.tableContainer} horizontal>
-          <View>
-            {/* Table Header - Day Names */}
-            <View style={styles.tableRow}>
-              <View style={[styles.cellCommessa, styles.headerCell]}>
-                <Text style={styles.headerText}>COMMESSA</Text>
-              </View>
-              {Array.from({ length: numDays }, (_, i) => {
-                const day = i + 1;
-                const dow = getDayOfWeek(day, selectedMonth, currentYear);
-                const weekend = isWeekend(day, selectedMonth, currentYear);
-                return (
-                  <View key={`dayname-${i}`} style={[styles.cellDay, styles.headerCell]}>
-                    <Text style={[styles.dayNameText, weekend && styles.weekendText]}>
-                      {ITALIAN_DAYS[dow]}
-                    </Text>
-                  </View>
-                );
-              })}
-              <View style={[styles.cellTotal, styles.headerCell]}>
-                <Text style={styles.headerText}>Tot. Ore</Text>
-              </View>
+      <ScrollView style={styles.content}>
+        {/* Entry Form Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Inserisci Ore</Text>
+          
+          {/* Day Selector */}
+          <TouchableOpacity
+            style={styles.inputRow}
+            onPress={() => setShowDayPicker(true)}
+          >
+            <View style={styles.inputLabel}>
+              <Ionicons name="calendar-outline" size={20} color="#666" />
+              <Text style={styles.inputLabelText}>Giorno</Text>
             </View>
-
-            {/* Table Header - Day Numbers */}
-            <View style={styles.tableRow}>
-              <View style={[styles.cellCommessa, styles.headerCell]} />
-              {Array.from({ length: numDays }, (_, i) => {
-                const day = i + 1;
-                const weekend = isWeekend(day, selectedMonth, currentYear);
-                return (
-                  <View key={`daynum-${i}`} style={[styles.cellDay, styles.headerCell]}>
-                    <Text style={[styles.dayNumberText, weekend && styles.weekendText]}>
-                      {day.toString().padStart(2, '0')}
-                    </Text>
-                  </View>
-                );
-              })}
-              <View style={[styles.cellTotal, styles.headerCell]} />
+            <View style={styles.inputValue}>
+              <Text style={[
+                styles.inputValueText,
+                isWeekend(selectedDay, selectedMonth, currentYear) && styles.weekendText
+              ]}>
+                {selectedDay} - {getDayOfWeekName(selectedDay, selectedMonth, currentYear)}
+              </Text>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
             </View>
+          </TouchableOpacity>
 
-            {/* Data Rows */}
-            {rows.map((row, rowIndex) => (
-              <View key={`row-${rowIndex}`} style={styles.tableRow}>
-                <TouchableOpacity
-                  style={[styles.cellCommessa, styles.dataCell]}
-                  onPress={() => {
-                    setCurrentEditingRow(rowIndex);
-                    setShowCommessaPicker(true);
-                  }}
-                  onLongPress={() => removeRow(rowIndex)}
-                >
-                  <Text style={styles.commessaText} numberOfLines={1}>
-                    {row.commessa || 'Seleziona...'}
-                  </Text>
-                </TouchableOpacity>
-                {Array.from({ length: numDays }, (_, dayIndex) => {
-                  const weekend = isWeekend(dayIndex + 1, selectedMonth, currentYear);
-                  return (
-                    <View
-                      key={`cell-${rowIndex}-${dayIndex}`}
-                      style={[styles.cellDay, styles.dataCell, weekend && styles.weekendCell]}
-                    >
-                      <TextInput
-                        style={styles.hoursInput}
-                        value={formatHours(row.hours[dayIndex] || 0)}
-                        onChangeText={(value) => updateHours(rowIndex, dayIndex, value)}
-                        keyboardType="decimal-pad"
-                        placeholder=""
-                        maxLength={4}
-                      />
-                    </View>
-                  );
-                })}
-                <View style={[styles.cellTotal, styles.dataCell]}>
-                  <Text style={styles.totalText}>
-                    {formatHours(calculateRowTotal(row)) || '0'}
-                  </Text>
-                </View>
-              </View>
-            ))}
+          {/* Commessa Selector */}
+          <TouchableOpacity
+            style={styles.inputRow}
+            onPress={() => setShowCommessaPicker(true)}
+          >
+            <View style={styles.inputLabel}>
+              <Ionicons name="briefcase-outline" size={20} color="#666" />
+              <Text style={styles.inputLabelText}>Commessa</Text>
+            </View>
+            <View style={styles.inputValue}>
+              <Text style={[
+                styles.inputValueText,
+                !selectedCommessa && styles.placeholderText
+              ]}>
+                {selectedCommessa || 'Seleziona commessa...'}
+              </Text>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
+            </View>
+          </TouchableOpacity>
 
-            {/* Empty rows placeholder */}
-            {rows.length === 0 && (
-              <View style={styles.emptyRow}>
-                <Text style={styles.emptyText}>
-                  Premi "Aggiungi Riga" per iniziare
-                </Text>
-              </View>
+          {/* Hours Input */}
+          <View style={styles.inputRow}>
+            <View style={styles.inputLabel}>
+              <Ionicons name="time-outline" size={20} color="#666" />
+              <Text style={styles.inputLabelText}>Ore</Text>
+            </View>
+            <TextInput
+              style={styles.hoursTextInput}
+              value={hoursInput}
+              onChangeText={setHoursInput}
+              placeholder="0"
+              placeholderTextColor="#999"
+              keyboardType="decimal-pad"
+              maxLength={5}
+            />
+          </View>
+
+          {/* Add Button */}
+          <TouchableOpacity
+            style={[styles.addButton, saving && styles.addButtonDisabled]}
+            onPress={addEntry}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="add-circle" size={24} color="#fff" />
+                <Text style={styles.addButtonText}>Aggiungi</Text>
+              </>
             )}
+          </TouchableOpacity>
+        </View>
 
-            {/* Totals Row */}
-            <View style={[styles.tableRow, styles.totalsRow]}>
-              <View style={[styles.cellCommessa, styles.totalCell]}>
-                <Text style={styles.totalLabelText}>TOTALE</Text>
-              </View>
-              {Array.from({ length: numDays }, (_, dayIndex) => (
-                <View key={`total-${dayIndex}`} style={[styles.cellDay, styles.totalCell]}>
-                  <Text style={styles.dayTotalText}>
-                    {formatHours(calculateDayTotal(dayIndex)) || '0'}
-                  </Text>
-                </View>
-              ))}
-              <View style={[styles.cellTotal, styles.totalCell]}>
-                <Text style={styles.grandTotalText}>
-                  {formatHours(rows.reduce((sum, row) => sum + calculateRowTotal(row), 0)) || '0'}
-                </Text>
-              </View>
+        {/* Entries List Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Ore Inserite</Text>
+            <View style={styles.totalBadge}>
+              <Text style={styles.totalBadgeText}>Totale: {formatHours(totalHours)} ore</Text>
             </View>
           </View>
-        </ScrollView>
-      )}
+
+          {loading ? (
+            <ActivityIndicator size="small" color="#2196F3" style={styles.listLoader} />
+          ) : monthEntries.length === 0 ? (
+            <View style={styles.emptyList}>
+              <Ionicons name="document-text-outline" size={48} color="#ddd" />
+              <Text style={styles.emptyListText}>Nessuna ora inserita per questo mese</Text>
+            </View>
+          ) : (
+            <View style={styles.entriesList}>
+              {monthEntries.map((entry, index) => (
+                <TouchableOpacity
+                  key={`${entry.day}-${entry.commessa}-${index}`}
+                  style={styles.entryItem}
+                  onLongPress={() => removeEntry(entry.commessa, entry.day)}
+                >
+                  <View style={[
+                    styles.entryDay,
+                    isWeekend(entry.day, selectedMonth, currentYear) && styles.entryDayWeekend
+                  ]}>
+                    <Text style={[
+                      styles.entryDayNumber,
+                      isWeekend(entry.day, selectedMonth, currentYear) && styles.entryDayWeekendText
+                    ]}>
+                      {entry.day}
+                    </Text>
+                    <Text style={[
+                      styles.entryDayName,
+                      isWeekend(entry.day, selectedMonth, currentYear) && styles.entryDayWeekendText
+                    ]}>
+                      {ITALIAN_DAYS_SHORT[new Date(currentYear, selectedMonth - 1, entry.day).getDay()]}
+                    </Text>
+                  </View>
+                  <View style={styles.entryDetails}>
+                    <Text style={styles.entryCommessa}>{entry.commessa}</Text>
+                  </View>
+                  <View style={styles.entryHours}>
+                    <Text style={styles.entryHoursText}>{formatHours(entry.hours)}</Text>
+                    <Text style={styles.entryHoursLabel}>ore</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          
+          <Text style={styles.hintText}>
+            Tieni premuto su una voce per eliminarla
+          </Text>
+        </View>
+      </ScrollView>
+
+      {/* Bottom Toolbar */}
+      <View style={styles.bottomToolbar}>
+        <TouchableOpacity style={styles.bottomButton} onPress={handlePreviewPDF} disabled={pdfLoading}>
+          <Ionicons name="eye" size={24} color="#FF9800" />
+          <Text style={styles.bottomButtonText}>Anteprima PDF</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.bottomButton} onPress={handleDownloadPDF} disabled={pdfLoading}>
+          <Ionicons name="download" size={24} color="#9C27B0" />
+          <Text style={styles.bottomButtonText}>Stampa PDF</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.bottomButton} onPress={openArchive}>
+          <Ionicons name="archive" size={24} color="#607D8B" />
+          <Text style={styles.bottomButtonText}>Archivio</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Month Picker Modal */}
       <Modal visible={showMonthPicker} transparent animationType="fade">
@@ -558,6 +607,55 @@ export default function TimesheetApp() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Day Picker Modal */}
+      <Modal visible={showDayPicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDayPicker(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Seleziona Giorno</Text>
+            <FlatList
+              data={Array.from({ length: numDays }, (_, i) => i + 1)}
+              keyExtractor={(item) => item.toString()}
+              numColumns={7}
+              renderItem={({ item }) => {
+                const weekend = isWeekend(item, selectedMonth, currentYear);
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.dayItem,
+                      selectedDay === item && styles.dayItemSelected,
+                      weekend && styles.dayItemWeekend
+                    ]}
+                    onPress={() => {
+                      setSelectedDay(item);
+                      setShowDayPicker(false);
+                    }}
+                  >
+                    <Text style={[
+                      styles.dayItemText,
+                      selectedDay === item && styles.dayItemTextSelected,
+                      weekend && styles.dayItemTextWeekend
+                    ]}>
+                      {item}
+                    </Text>
+                    <Text style={[
+                      styles.dayItemDayName,
+                      selectedDay === item && styles.dayItemTextSelected,
+                      weekend && styles.dayItemTextWeekend
+                    ]}>
+                      {ITALIAN_DAYS_SHORT[new Date(currentYear, selectedMonth - 1, item).getDay()]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Commessa Picker Modal */}
       <Modal visible={showCommessaPicker} transparent animationType="fade">
         <TouchableOpacity
@@ -565,14 +663,12 @@ export default function TimesheetApp() {
           activeOpacity={1}
           onPress={() => {
             setShowCommessaPicker(false);
-            setCurrentEditingRow(null);
             setNewCommessaInput('');
           }}
         >
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Seleziona Commessa</Text>
             
-            {/* New commessa input */}
             <View style={styles.newCommessaContainer}>
               <TextInput
                 style={styles.newCommessaInput}
@@ -589,15 +685,25 @@ export default function TimesheetApp() {
               </TouchableOpacity>
             </View>
             
-            {/* Existing commesse */}
             <ScrollView style={styles.commessaList}>
               {commesse.map((c) => (
                 <TouchableOpacity
                   key={c.id}
-                  style={styles.commessaItem}
-                  onPress={() => selectCommessaForRow(c.name)}
+                  style={[
+                    styles.commessaItem,
+                    selectedCommessa === c.name && styles.commessaItemSelected
+                  ]}
+                  onPress={() => selectCommessa(c.name)}
                 >
-                  <Text style={styles.commessaItemText}>{c.name}</Text>
+                  <Text style={[
+                    styles.commessaItemText,
+                    selectedCommessa === c.name && styles.commessaItemTextSelected
+                  ]}>
+                    {c.name}
+                  </Text>
+                  {selectedCommessa === c.name && (
+                    <Ionicons name="checkmark" size={20} color="#2196F3" />
+                  )}
                 </TouchableOpacity>
               ))}
               {commesse.length === 0 && (
@@ -668,7 +774,7 @@ export default function TimesheetApp() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f0f2f5',
   },
   loadingContainer: {
     flex: 1,
@@ -685,30 +791,32 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerRight: {
-    alignItems: 'flex-end',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   monthButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#e3f2fd',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
   },
   monthText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginRight: 8,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976D2',
+    marginHorizontal: 8,
+  },
+  headerRight: {
+    alignItems: 'flex-end',
   },
   employeeName: {
     fontSize: 16,
@@ -718,130 +826,208 @@ const styles = StyleSheet.create({
   matricola: {
     fontSize: 14,
     color: '#666',
+    marginTop: 2,
   },
-  toolbar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 10,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  toolButton: {
-    alignItems: 'center',
-    padding: 8,
-  },
-  toolButtonText: {
-    fontSize: 11,
-    color: '#666',
-    marginTop: 4,
-  },
-  tableContainer: {
+  content: {
     flex: 1,
-    backgroundColor: '#fff',
+    padding: 16,
   },
-  tableRow: {
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  cardHeader: {
     flexDirection: 'row',
-  },
-  cellCommessa: {
-    width: 120,
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    borderWidth: 0.5,
-    borderColor: '#ddd',
-  },
-  cellDay: {
-    width: 40,
-    minHeight: 36,
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: '#ddd',
+    marginBottom: 16,
   },
-  cellTotal: {
-    width: 60,
-    minHeight: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: '#ddd',
-    backgroundColor: '#f9f9f9',
-  },
-  headerCell: {
-    backgroundColor: '#e8e8e8',
-  },
-  dataCell: {
-    backgroundColor: '#fff',
-  },
-  weekendCell: {
-    backgroundColor: '#fff5f5',
-  },
-  totalCell: {
-    backgroundColor: '#e0e0e0',
-  },
-  headerText: {
-    fontSize: 10,
+  cardTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    textAlign: 'center',
+    marginBottom: 16,
   },
-  dayNameText: {
-    fontSize: 10,
-    color: '#333',
+  totalBadge: {
+    backgroundColor: '#e8f5e9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
-  dayNumberText: {
-    fontSize: 11,
-    fontWeight: 'bold',
+  totalBadgeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  inputLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputLabelText: {
+    fontSize: 15,
+    color: '#666',
+    marginLeft: 10,
+  },
+  inputValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputValueText: {
+    fontSize: 15,
     color: '#333',
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  placeholderText: {
+    color: '#999',
+    fontWeight: 'normal',
   },
   weekendText: {
     color: '#e53935',
   },
-  commessaText: {
-    fontSize: 11,
+  hoursTextInput: {
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#333',
+    textAlign: 'right',
+    minWidth: 80,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
   },
-  hoursInput: {
-    width: '100%',
-    height: '100%',
+  addButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 20,
+  },
+  addButtonDisabled: {
+    backgroundColor: '#a5d6a7',
+  },
+  addButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  listLoader: {
+    padding: 40,
+  },
+  emptyList: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyListText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 12,
     textAlign: 'center',
-    fontSize: 11,
-    color: '#333',
   },
-  totalText: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#333',
+  entriesList: {
+    marginTop: -8,
   },
-  totalLabelText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#333',
+  entryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  dayTotalText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#333',
+  entryDay: {
+    width: 50,
+    height: 50,
+    backgroundColor: '#e3f2fd',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  grandTotalText: {
-    fontSize: 12,
+  entryDayWeekend: {
+    backgroundColor: '#ffebee',
+  },
+  entryDayNumber: {
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#1976D2',
   },
-  totalsRow: {
-    borderTopWidth: 2,
-    borderTopColor: '#333',
+  entryDayWeekendText: {
+    color: '#e53935',
   },
-  emptyRow: {
-    padding: 40,
-    alignItems: 'center',
+  entryDayName: {
+    fontSize: 10,
+    color: '#1976D2',
+    marginTop: 2,
   },
-  emptyText: {
-    fontSize: 14,
+  entryDetails: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  entryCommessa: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#333',
+  },
+  entryHours: {
+    alignItems: 'flex-end',
+  },
+  entryHoursText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  entryHoursLabel: {
+    fontSize: 11,
     color: '#999',
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 16,
     fontStyle: 'italic',
+  },
+  bottomToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  bottomButton: {
+    alignItems: 'center',
+    padding: 8,
+    minWidth: 100,
+  },
+  bottomButtonText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   modalOverlay: {
     flex: 1,
@@ -851,24 +1037,24 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 20,
     width: '90%',
     maxWidth: 400,
     maxHeight: '80%',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 16,
+    marginBottom: 20,
     textAlign: 'center',
   },
   monthItem: {
     flex: 1,
-    padding: 12,
+    padding: 14,
     margin: 4,
-    borderRadius: 8,
+    borderRadius: 10,
     backgroundColor: '#f5f5f5',
     alignItems: 'center',
   },
@@ -876,12 +1062,43 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
   },
   monthItemText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#333',
   },
   monthItemTextSelected: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  dayItem: {
+    flex: 1,
+    padding: 10,
+    margin: 3,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    minWidth: 40,
+  },
+  dayItemSelected: {
+    backgroundColor: '#2196F3',
+  },
+  dayItemWeekend: {
+    backgroundColor: '#ffebee',
+  },
+  dayItemText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  dayItemTextSelected: {
+    color: '#fff',
+  },
+  dayItemTextWeekend: {
+    color: '#e53935',
+  },
+  dayItemDayName: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 2,
   },
   newCommessaContainer: {
     flexDirection: 'row',
@@ -891,17 +1108,17 @@ const styles = StyleSheet.create({
     flex: 1,
     borderWidth: 1,
     borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginRight: 8,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    marginRight: 10,
   },
   addCommessaButton: {
     backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    width: 44,
-    height: 44,
+    borderRadius: 10,
+    width: 48,
+    height: 48,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -909,13 +1126,24 @@ const styles = StyleSheet.create({
     maxHeight: 300,
   },
   commessaItem: {
-    padding: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  commessaItemSelected: {
+    backgroundColor: '#e3f2fd',
   },
   commessaItemText: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#333',
+  },
+  commessaItemTextSelected: {
+    color: '#1976D2',
+    fontWeight: '500',
   },
   noCommesseText: {
     textAlign: 'center',
@@ -929,9 +1157,11 @@ const styles = StyleSheet.create({
   archiveItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#f0f0f0',
+    borderRadius: 8,
+    marginBottom: 4,
   },
   archiveItemWithData: {
     backgroundColor: '#f0fff0',
@@ -941,7 +1171,7 @@ const styles = StyleSheet.create({
   },
   archiveItemText: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 15,
     color: '#666',
     marginLeft: 12,
   },
