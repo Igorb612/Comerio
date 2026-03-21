@@ -368,6 +368,68 @@ export default function TimesheetApp() {
     }
   };
 
+  const handleShareWhatsApp = async () => {
+    setPdfLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        if (Platform.OS === 'web') {
+          // For web, save file first then try to share
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const file = new File([blob], data.filename, { type: 'application/pdf' });
+          
+          // Try Web Share API first
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}`,
+              text: `Timesheet ore lavorate - ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}`,
+            });
+          } else {
+            // Fallback: download file and show instruction
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = data.filename;
+            link.click();
+            Alert.alert(
+              'PDF Scaricato',
+              'Il PDF è stato scaricato. Aprilo e condividilo su WhatsApp manualmente.'
+            );
+          }
+        } else {
+          // For mobile, save file and share (WhatsApp will appear in share options)
+          if (await Sharing.isAvailableAsync()) {
+            const fileUri = `${FileSystem.cacheDirectory}${data.filename}`;
+            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            await Sharing.shareAsync(fileUri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Invia PDF via WhatsApp',
+              UTI: 'com.adobe.pdf',
+            });
+          } else {
+            Alert.alert('Info', 'La condivisione non è disponibile su questo dispositivo');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error sharing PDF:', error);
+      Alert.alert('Errore', 'Errore durante la condivisione del PDF');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const selectCommessa = (commessa: string) => {
     setSelectedCommessa(commessa);
     setShowCommessaPicker(false);
@@ -599,17 +661,22 @@ export default function TimesheetApp() {
       {/* Bottom Toolbar */}
       <View style={styles.bottomToolbar}>
         <TouchableOpacity style={styles.bottomButton} onPress={handlePreviewPDF} disabled={pdfLoading}>
-          <Ionicons name="eye" size={24} color="#FF9800" />
-          <Text style={styles.bottomButtonText}>Anteprima PDF</Text>
+          <Ionicons name="eye" size={22} color="#FF9800" />
+          <Text style={styles.bottomButtonText}>Anteprima</Text>
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.bottomButton} onPress={handleDownloadPDF} disabled={pdfLoading}>
-          <Ionicons name="download" size={24} color="#9C27B0" />
+          <Ionicons name="download" size={22} color="#9C27B0" />
           <Text style={styles.bottomButtonText}>Stampa PDF</Text>
         </TouchableOpacity>
         
+        <TouchableOpacity style={styles.bottomButton} onPress={handleShareWhatsApp} disabled={pdfLoading}>
+          <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
+          <Text style={styles.bottomButtonText}>Invia PDF</Text>
+        </TouchableOpacity>
+        
         <TouchableOpacity style={styles.bottomButton} onPress={openArchive}>
-          <Ionicons name="archive" size={24} color="#607D8B" />
+          <Ionicons name="archive" size={22} color="#607D8B" />
           <Text style={styles.bottomButtonText}>Archivio</Text>
         </TouchableOpacity>
       </View>
