@@ -373,6 +373,40 @@ export default function TimesheetApp() {
     setNewCommessaInput('');
   };
 
+  const deleteCommessa = async (commessa: Commessa) => {
+    Alert.alert(
+      'Elimina Commessa',
+      `Vuoi eliminare la commessa "${commessa.name}"?`,
+      [
+        { text: 'Annulla', style: 'cancel' },
+        {
+          text: 'Elimina',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch(`${API_URL}/api/commesse/${commessa.id}`, {
+                method: 'DELETE',
+              });
+              if (response.ok) {
+                // Remove from local state
+                setCommesse(commesse.filter(c => c.id !== commessa.id));
+                // Clear selection if this commessa was selected
+                if (selectedCommessa === commessa.name) {
+                  setSelectedCommessa('');
+                }
+              } else {
+                Alert.alert('Errore', 'Errore durante l\'eliminazione');
+              }
+            } catch (error) {
+              console.error('Error deleting commessa:', error);
+              Alert.alert('Errore', 'Errore durante l\'eliminazione');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const addNewCommessa = () => {
     if (newCommessaInput.trim()) {
       selectCommessa(newCommessaInput.trim());
@@ -703,6 +737,7 @@ export default function TimesheetApp() {
                     selectedCommessa === c.name && styles.commessaItemSelected
                   ]}
                   onPress={() => selectCommessa(c.name)}
+                  onLongPress={() => deleteCommessa(c)}
                 >
                   <Text style={[
                     styles.commessaItemText,
@@ -721,6 +756,10 @@ export default function TimesheetApp() {
                 </Text>
               )}
             </ScrollView>
+            
+            <Text style={styles.hintTextModal}>
+              Tieni premuto su una commessa per eliminarla
+            </Text>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1198,5 +1237,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     marginTop: 12,
+  },
+  hintTextModal: {
+    fontSize: 11,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 12,
+    fontStyle: 'italic',
   },
 });
