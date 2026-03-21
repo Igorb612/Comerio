@@ -403,44 +403,33 @@ export default function TimesheetApp() {
             );
           }, 500);
         } else {
-          // For mobile - use Print to create file then share
+          // For mobile - download PDF from server and share
           try {
-            // Generate PDF using expo-print
-            const { uri } = await Print.printToFileAsync({
-              html: `
-                <html>
-                <head>
-                  <style>
-                    body { font-family: Arial; text-align: center; padding: 20px; }
-                    h1 { color: #333; }
-                    h2 { color: red; }
-                  </style>
-                </head>
-                <body>
-                  <h1>${appInfo?.employee_name?.toUpperCase() || 'IGOR MARTIGNONI'}  ${appInfo?.matricola || '546'}</h1>
-                  <h2>${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}</h2>
-                  <p>Timesheet generato dall'app</p>
-                  <p>Totale ore: ${formatHours(totalHours)}</p>
-                </body>
-                </html>
-              `,
+            // Download the PDF to device cache using the download endpoint
+            const downloadUrl = `${API_URL}/api/timesheets/${selectedMonth}/pdf/download`;
+            const fileUri = FileSystem.cacheDirectory + data.filename;
+            
+            // Write base64 to file
+            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
+              encoding: FileSystem.EncodingType.Base64,
             });
             
-            // Share the generated file
-            await Sharing.shareAsync(uri, {
+            // Share the file
+            await Sharing.shareAsync(fileUri, {
               mimeType: 'application/pdf',
               dialogTitle: 'Invia Timesheet via WhatsApp',
             });
-          } catch (printError) {
-            console.error('Print error:', printError);
+          } catch (fileError) {
+            console.error('File error:', fileError);
             // Fallback: open WhatsApp with text message
-            const message = `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear} - ${appInfo?.employee_name} - Totale ore: ${formatHours(totalHours)}`;
+            const message = `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}\n${appInfo?.employee_name} - ${appInfo?.matricola}\nTotale ore: ${formatHours(totalHours)}`;
             const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
             const canOpen = await Linking.canOpenURL(whatsappUrl);
             if (canOpen) {
               await Linking.openURL(whatsappUrl);
+              Alert.alert('Info', 'Per inviare il PDF completo, usa "Stampa PDF" e condividi il file scaricato.');
             } else {
-              Alert.alert('WhatsApp', 'WhatsApp non è installato sul dispositivo');
+              Alert.alert('Errore', 'WhatsApp non è installato. Usa "Stampa PDF" per scaricare il file.');
             }
           }
         }
