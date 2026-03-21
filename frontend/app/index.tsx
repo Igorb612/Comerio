@@ -369,15 +369,109 @@ export default function TimesheetApp() {
     }
   };
 
+  // Generate HTML table for PDF
+  const generatePdfHtml = () => {
+    const daysInMonth = getDaysInMonth(selectedMonth, currentYear);
+    const monthName = ITALIAN_MONTHS[selectedMonth - 1];
+    
+    // Build day headers
+    let dayNamesRow = '<th style="width:80px;background:#e0e0e0;padding:4px;font-size:8px;">COMMESSA</th>';
+    let dayNumbersRow = '<th style="background:#e0e0e0;"></th>';
+    
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(currentYear, selectedMonth - 1, d);
+      const dayOfWeek = date.getDay();
+      const dayNames = ['Do', 'Lu', 'Ma', 'Me', 'Gi', 'Ve', 'Sa'];
+      const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6;
+      const color = isWeekendDay ? 'red' : 'black';
+      
+      dayNamesRow += `<th style="width:22px;background:#e0e0e0;padding:2px;font-size:7px;color:${color};">${dayNames[dayOfWeek]}</th>`;
+      dayNumbersRow += `<th style="background:#e0e0e0;padding:2px;font-size:8px;color:${color};">${d.toString().padStart(2, '0')}</th>`;
+    }
+    dayNamesRow += '<th style="width:45px;background:#e0e0e0;padding:4px;font-size:8px;">Tot.Ore</th>';
+    dayNumbersRow += '<th style="background:#e0e0e0;"></th>';
+    
+    // Build data rows
+    let dataRows = '';
+    let dailyTotals = new Array(daysInMonth).fill(0);
+    
+    rows.forEach(row => {
+      if (row.commessa.trim()) {
+        let rowHtml = `<td style="text-align:center;padding:3px;font-size:7px;border:1px solid #ccc;">${row.commessa}</td>`;
+        let rowTotal = 0;
+        
+        for (let d = 0; d < daysInMonth; d++) {
+          const hours = row.hours[d] || 0;
+          const display = hours > 0 ? hours.toString().replace('.', ',') : '';
+          rowHtml += `<td style="text-align:center;padding:2px;font-size:7px;border:1px solid #ccc;">${display}</td>`;
+          rowTotal += hours;
+          dailyTotals[d] += hours;
+        }
+        
+        rowHtml += `<td style="text-align:center;padding:3px;font-size:8px;font-weight:bold;border:1px solid #ccc;background:#f5f5f5;">${rowTotal > 0 ? rowTotal.toString().replace('.', ',') : '0'}</td>`;
+        dataRows += `<tr>${rowHtml}</tr>`;
+      }
+    });
+    
+    // Add empty rows if needed
+    const minRows = 15;
+    const currentRows = rows.filter(r => r.commessa.trim()).length;
+    for (let i = currentRows; i < minRows; i++) {
+      let emptyRow = '<td style="padding:3px;border:1px solid #ccc;">&nbsp;</td>';
+      for (let d = 0; d < daysInMonth; d++) {
+        emptyRow += '<td style="border:1px solid #ccc;">&nbsp;</td>';
+      }
+      emptyRow += '<td style="border:1px solid #ccc;background:#f5f5f5;">0</td>';
+      dataRows += `<tr>${emptyRow}</tr>`;
+    }
+    
+    // Build totals row
+    let totalsRow = '<td style="text-align:center;padding:3px;font-size:8px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">TOTALE</td>';
+    let grandTotal = 0;
+    for (let d = 0; d < daysInMonth; d++) {
+      const total = dailyTotals[d];
+      grandTotal += total;
+      totalsRow += `<td style="text-align:center;padding:2px;font-size:7px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">${total > 0 ? total.toString().replace('.', ',') : '0'}</td>`;
+    }
+    totalsRow += `<td style="text-align:center;padding:3px;font-size:9px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">${grandTotal.toString().replace('.', ',')}</td>`;
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          @page { size: A4 landscape; margin: 10mm; }
+          body { font-family: Arial, sans-serif; margin: 0; padding: 10px; }
+          h1 { text-align: center; font-size: 16px; margin: 5px 0; color: #000; }
+          h2 { text-align: center; font-size: 12px; margin: 5px 0 15px 0; color: red; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th, td { border: 1px solid #999; }
+        </style>
+      </head>
+      <body>
+        <h1>${appInfo?.employee_name?.toUpperCase() || 'IGOR MARTIGNONI'}  ${appInfo?.matricola || '546'}</h1>
+        <h2>${monthName} ${currentYear}</h2>
+        <table>
+          <tr>${dayNamesRow}</tr>
+          <tr>${dayNumbersRow}</tr>
+          ${dataRows}
+          <tr>${totalsRow}</tr>
+        </table>
+      </body>
+      </html>
+    `;
+  };
+
   const handleShareWhatsApp = async () => {
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
-      const data = await response.json();
-      
-      if (data.pdf_base64) {
-        if (Platform.OS === 'web') {
-          // For web, download file and open WhatsApp Web
+      if (Platform.OS === 'web') {
+        // For web, use backend PDF
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
           const byteCharacters = atob(data.pdf_base64);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
@@ -386,64 +480,36 @@ export default function TimesheetApp() {
           const byteArray = new Uint8Array(byteNumbers);
           const blob = new Blob([byteArray], { type: 'application/pdf' });
           
-          // Download the file first
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
           link.download = data.filename;
           link.click();
           
-          // Open WhatsApp Web
           setTimeout(() => {
-            const whatsappUrl = `https://web.whatsapp.com/`;
-            window.open(whatsappUrl, '_blank');
-            Alert.alert(
-              'PDF Scaricato',
-              'Il PDF è stato scaricato. Ora puoi allegarlo nella chat di WhatsApp Web che si è aperta.'
-            );
+            window.open('https://web.whatsapp.com/', '_blank');
+            Alert.alert('PDF Scaricato', 'Allega il PDF scaricato nella chat WhatsApp.');
           }, 500);
-        } else {
-          // For mobile - download PDF directly from server
-          try {
-            const filename = data.filename || `timesheet_${selectedMonth}_${currentYear}.pdf`;
-            const fileUri = FileSystem.cacheDirectory + filename;
-            
-            // Download PDF directly from the download endpoint
-            const downloadResult = await FileSystem.downloadAsync(
-              `${API_URL}/api/timesheets/${selectedMonth}/pdf/download`,
-              fileUri
-            );
-            
-            if (downloadResult.status === 200) {
-              // Share the downloaded PDF file
-              await Sharing.shareAsync(downloadResult.uri, {
-                mimeType: 'application/pdf',
-                dialogTitle: 'Invia Timesheet via WhatsApp',
-                UTI: 'com.adobe.pdf',
-              });
-            } else {
-              throw new Error('Download failed');
-            }
-          } catch (fileError) {
-            console.error('File error:', fileError);
-            // Fallback: open WhatsApp with text message
-            const message = `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}\n${appInfo?.employee_name} - ${appInfo?.matricola}\nTotale ore: ${formatHours(totalHours)}`;
-            const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
-            const canOpen = await Linking.canOpenURL(whatsappUrl);
-            if (canOpen) {
-              await Linking.openURL(whatsappUrl);
-              Alert.alert('Info', 'Per inviare il PDF completo, usa "Stampa PDF" e condividi il file scaricato.');
-            } else {
-              Alert.alert('Errore', 'Usa "Stampa PDF" per scaricare e condividere il file.');
-            }
-          }
         }
       } else {
-        Alert.alert('Errore', 'Nessun PDF generato');
+        // For mobile - generate PDF locally with expo-print
+        const html = generatePdfHtml();
+        
+        const { uri } = await Print.printToFileAsync({
+          html: html,
+          width: 842,  // A4 landscape width in points
+          height: 595, // A4 landscape height in points
+        });
+        
+        // Share the generated PDF
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Invia Timesheet via WhatsApp',
+        });
       }
     } catch (error) {
       console.error('Error sharing PDF:', error);
-      Alert.alert('Errore', 'Errore durante la condivisione');
+      Alert.alert('Errore', 'Errore durante la creazione del PDF. Riprova.');
     } finally {
       setPdfLoading(false);
     }
