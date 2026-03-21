@@ -376,7 +376,7 @@ export default function TimesheetApp() {
       
       if (data.pdf_base64) {
         if (Platform.OS === 'web') {
-          // For web, save file first then try to share
+          // For web, download file and open WhatsApp Web
           const byteCharacters = atob(data.pdf_base64);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
@@ -384,47 +384,45 @@ export default function TimesheetApp() {
           }
           const byteArray = new Uint8Array(byteNumbers);
           const blob = new Blob([byteArray], { type: 'application/pdf' });
-          const file = new File([blob], data.filename, { type: 'application/pdf' });
           
-          // Try Web Share API first
-          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              files: [file],
-              title: `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}`,
-              text: `Timesheet ore lavorate - ${ITALIAN_MONTHS[selectedMonth - 1]} ${currentYear}`,
-            });
-          } else {
-            // Fallback: download file and show instruction
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = data.filename;
-            link.click();
+          // Download the file first
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = data.filename;
+          link.click();
+          
+          // Open WhatsApp Web
+          setTimeout(() => {
+            const whatsappUrl = `https://web.whatsapp.com/`;
+            window.open(whatsappUrl, '_blank');
             Alert.alert(
               'PDF Scaricato',
-              'Il PDF è stato scaricato. Aprilo e condividilo su WhatsApp manualmente.'
+              'Il PDF è stato scaricato. Ora puoi allegarlo nella chat di WhatsApp Web che si è aperta.'
             );
-          }
+          }, 500);
         } else {
           // For mobile, save file and share (WhatsApp will appear in share options)
-          if (await Sharing.isAvailableAsync()) {
+          const isAvailable = await Sharing.isAvailableAsync();
+          if (isAvailable && FileSystem && FileSystem.cacheDirectory) {
             const fileUri = `${FileSystem.cacheDirectory}${data.filename}`;
             await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
-              encoding: FileSystem.EncodingType.Base64,
+              encoding: 'base64',
             });
             await Sharing.shareAsync(fileUri, {
               mimeType: 'application/pdf',
               dialogTitle: 'Invia PDF via WhatsApp',
-              UTI: 'com.adobe.pdf',
             });
           } else {
             Alert.alert('Info', 'La condivisione non è disponibile su questo dispositivo');
           }
         }
+      } else {
+        Alert.alert('Errore', 'Nessun PDF generato');
       }
     } catch (error) {
       console.error('Error sharing PDF:', error);
-      Alert.alert('Errore', 'Errore durante la condivisione del PDF');
+      Alert.alert('Errore', 'Errore durante la condivisione. Prova a scaricare il PDF con "Stampa PDF".');
     } finally {
       setPdfLoading(false);
     }
