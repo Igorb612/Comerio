@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -305,8 +306,10 @@ export default function TimesheetApp() {
           const url = URL.createObjectURL(blob);
           window.open(url, '_blank');
         } else {
+          // For mobile, use print with orientation
           await Print.printAsync({
-            uri: `data:application/pdf;base64,${data.pdf_base64}`
+            uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            orientation: Print.Orientation.landscape,
           });
         }
       }
@@ -326,6 +329,7 @@ export default function TimesheetApp() {
       
       if (data.pdf_base64) {
         if (Platform.OS === 'web') {
+          // Download PDF directly
           const byteCharacters = atob(data.pdf_base64);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
@@ -339,12 +343,17 @@ export default function TimesheetApp() {
           link.download = data.filename;
           link.click();
         } else {
+          // For mobile, save file and share
           if (await Sharing.isAvailableAsync()) {
-            const result = await Print.printToFileAsync({
-              html: `<html><body><p>PDF</p></body></html>`,
-              base64: false
+            // Create file from base64
+            const fileUri = `${FileSystem.cacheDirectory}${data.filename}`;
+            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
+              encoding: FileSystem.EncodingType.Base64,
             });
-            await Sharing.shareAsync(result.uri);
+            await Sharing.shareAsync(fileUri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Salva o condividi il PDF',
+            });
           } else {
             Alert.alert('Info', 'La condivisione non è disponibile su questo dispositivo');
           }
