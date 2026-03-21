@@ -206,31 +206,34 @@ async def generate_pdf(month: int):
     elements = []
     styles = getSampleStyleSheet()
     
-    # Title style
-    title_style = ParagraphStyle(
-        'CustomTitle',
+    # Employee name style - uppercase, centered, bold
+    name_style = ParagraphStyle(
+        'EmployeeName',
         parent=styles['Heading1'],
-        fontSize=16,
+        fontSize=18,
         alignment=1,  # Center
-        spaceAfter=5*mm
+        spaceAfter=2*mm,
+        textColor=colors.black,
+        fontName='Helvetica-Bold'
     )
     
-    # Header with month and employee info
-    month_name = ITALIAN_MONTHS[month - 1]
-    title = Paragraph(f"<b>{month_name} {CURRENT_YEAR}</b>", title_style)
-    
-    employee_style = ParagraphStyle(
-        'Employee',
+    # Month style - centered, smaller, red
+    month_style = ParagraphStyle(
+        'MonthTitle',
         parent=styles['Normal'],
-        fontSize=12,
-        alignment=2,  # Right
-        spaceAfter=5*mm
+        fontSize=14,
+        alignment=1,  # Center
+        spaceAfter=8*mm,
+        textColor=colors.red,
+        fontName='Helvetica-Bold'
     )
-    employee_info = Paragraph(f"<b>{EMPLOYEE_NAME}  {MATRICOLA}</b>", employee_style)
     
-    elements.append(title)
-    elements.append(employee_info)
-    elements.append(Spacer(1, 3*mm))
+    # Header with employee name (uppercase) and month
+    month_name = ITALIAN_MONTHS[month - 1].capitalize()
+    employee_name_upper = f"{EMPLOYEE_NAME.upper()}  {MATRICOLA}"
+    
+    elements.append(Paragraph(f"<b>{employee_name_upper}</b>", name_style))
+    elements.append(Paragraph(f"<b>{month_name} {CURRENT_YEAR}</b>", month_style))
     
     # Calculate days
     num_days = get_days_in_month(month)
