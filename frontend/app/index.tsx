@@ -523,7 +523,7 @@ export default function TimesheetApp() {
   const deleteCommessa = async (commessa: Commessa) => {
     if (Platform.OS === 'web') {
       // Use window.confirm for web
-      const confirmed = window.confirm(`Vuoi eliminare la commessa "${commessa.name}"?`);
+      const confirmed = window.confirm(`Vuoi eliminare la commessa "${commessa.name}" e tutti i dati relativi?`);
       if (confirmed) {
         try {
           const response = await fetch(`${API_URL}/api/commesse/${commessa.id}`, {
@@ -534,6 +534,9 @@ export default function TimesheetApp() {
             if (selectedCommessa === commessa.name) {
               setSelectedCommessa('');
             }
+            // Reload timesheet data to reflect removed rows
+            await fetchTimesheet();
+            alert('Commessa e tutti i dati relativi eliminati');
           } else {
             alert('Errore durante l\'eliminazione');
           }
@@ -546,7 +549,7 @@ export default function TimesheetApp() {
       // Use Alert for mobile
       Alert.alert(
         'Elimina Commessa',
-        `Vuoi eliminare la commessa "${commessa.name}"?`,
+        `Vuoi eliminare la commessa "${commessa.name}" e tutti i dati relativi?`,
         [
           { text: 'Annulla', style: 'cancel' },
           {
@@ -562,6 +565,9 @@ export default function TimesheetApp() {
                   if (selectedCommessa === commessa.name) {
                     setSelectedCommessa('');
                   }
+                  // Reload timesheet data to reflect removed rows
+                  await fetchTimesheet();
+                  Alert.alert('Eliminato', 'Commessa e tutti i dati relativi eliminati');
                 } else {
                   Alert.alert('Errore', 'Errore durante l\'eliminazione');
                 }

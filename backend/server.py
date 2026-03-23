@@ -111,10 +111,31 @@ async def create_commessa(input: CommessaCreate):
 
 @api_router.delete("/commesse/{commessa_id}")
 async def delete_commessa(commessa_id: str):
-    result = await db.commesse.delete_one({"id": commessa_id})
-    if result.deleted_count == 0:
+    # First get the commessa name
+    commessa = await db.commesse.find_one({"id": commessa_id})
+    if not commessa:
         raise HTTPException(status_code=404, detail="Commessa not found")
-    return {"message": "Commessa deleted"}
+    
+    commessa_name = commessa["name"]
+    
+    # Delete the commessa
+    await db.commesse.delete_one({"id": commessa_id})
+    
+    # Remove all rows with this commessa from all timesheets
+    timesheets = await db.timesheets.find({}).to_list(1000)
+    for timesheet in timesheets:
+        # Filter out rows with this commessa
+        original_rows = timesheet.get("rows", [])
+        filtered_rows = [row for row in original_rows if row.get("commessa") != commessa_name]
+        
+        # Update timesheet if rows changed
+        if len(filtered_rows) != len(original_rows):
+            await db.timesheets.update_one(
+                {"id": timesheet["id"]},
+                {"$set": {"rows": filtered_rows, "updated_at": datetime.utcnow()}}
+            )
+    
+    return {"message": f"Commessa '{commessa_name}' e tutti i dati relativi eliminati"}
 
 # Timesheet endpoints
 @api_router.get("/timesheets", response_model=List[Timesheet])
