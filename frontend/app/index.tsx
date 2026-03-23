@@ -80,11 +80,13 @@ const isWeekend = (day: number, month: number, year: number): boolean => {
 export default function TimesheetApp() {
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [rows, setRows] = useState<TimesheetRow[]>([]);
   const [commesse, setCommesse] = useState<Commessa[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showYearPicker, setShowYearPicker] = useState(false);
   const [showCommessaPicker, setShowCommessaPicker] = useState(false);
   const [showDayPicker, setShowDayPicker] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
@@ -97,8 +99,11 @@ export default function TimesheetApp() {
   const [hoursInput, setHoursInput] = useState<string>('');
   const [newCommessaInput, setNewCommessaInput] = useState('');
 
-  const currentYear = appInfo?.current_year || 2025;
-  const numDays = getDaysInMonth(selectedMonth, currentYear);
+  // Available years (current year +/- 5)
+  const currentRealYear = new Date().getFullYear();
+  const availableYears = Array.from({ length: 11 }, (_, i) => currentRealYear - 5 + i);
+
+  const numDays = getDaysInMonth(selectedMonth, selectedYear);
 
   // Fetch app info
   useEffect(() => {
@@ -106,14 +111,14 @@ export default function TimesheetApp() {
     fetchCommesse();
   }, []);
 
-  // Fetch timesheet when month changes
+  // Fetch timesheet when month or year changes
   useEffect(() => {
     fetchTimesheet();
     // Reset selected day if it exceeds days in new month
-    if (selectedDay > getDaysInMonth(selectedMonth, currentYear)) {
+    if (selectedDay > getDaysInMonth(selectedMonth, selectedYear)) {
       setSelectedDay(1);
     }
-  }, [selectedMonth]);
+  }, [selectedMonth, selectedYear]);
 
   const fetchAppInfo = async () => {
     try {
@@ -138,7 +143,7 @@ export default function TimesheetApp() {
   const fetchTimesheet = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}`);
       if (response.ok) {
         const data = await response.json();
         if (data) {
@@ -175,6 +180,7 @@ export default function TimesheetApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           month: selectedMonth,
+          year: selectedYear,
           rows: newRows.filter(r => r.commessa.trim() !== '')
         })
       });
@@ -293,7 +299,7 @@ export default function TimesheetApp() {
   const handlePreviewPDF = async () => {
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
@@ -326,7 +332,7 @@ export default function TimesheetApp() {
   const handleDownloadPDF = async () => {
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
@@ -371,7 +377,7 @@ export default function TimesheetApp() {
 
   // Generate HTML table for PDF
   const generatePdfHtml = () => {
-    const daysInMonth = getDaysInMonth(selectedMonth, currentYear);
+    const daysInMonth = getDaysInMonth(selectedMonth, selectedYear);
     const monthName = ITALIAN_MONTHS[selectedMonth - 1];
     
     // Build day headers
@@ -379,7 +385,7 @@ export default function TimesheetApp() {
     let dayNumbersRow = '<th style="background:#e0e0e0;"></th>';
     
     for (let d = 1; d <= daysInMonth; d++) {
-      const date = new Date(currentYear, selectedMonth - 1, d);
+      const date = new Date(selectedYear, selectedMonth - 1, d);
       const dayOfWeek = date.getDay();
       const dayNames = ['Do', 'Lu', 'Ma', 'Me', 'Gi', 'Ve', 'Sa'];
       const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6;
@@ -444,7 +450,7 @@ export default function TimesheetApp() {
       </head>
       <body>
         <h1>${appInfo?.employee_name?.toUpperCase() || 'IGOR MARTIGNONI'}  ${appInfo?.matricola || '546'}</h1>
-        <h2>${monthName} ${currentYear}</h2>
+        <h2>${monthName} ${selectedYear}</h2>
         <table>
           <tr>${dayNamesRow}</tr>
           <tr>${dayNumbersRow}</tr>
@@ -461,7 +467,7 @@ export default function TimesheetApp() {
     try {
       if (Platform.OS === 'web') {
         // For web, use backend PDF
-        const response = await fetch(`${API_URL}/api/timesheets/${selectedMonth}/pdf`);
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
         const data = await response.json();
         
         if (data.pdf_base64) {
@@ -582,16 +588,26 @@ export default function TimesheetApp() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.monthButton}
-          onPress={() => setShowMonthPicker(true)}
-        >
-          <Ionicons name="calendar" size={24} color="#2196F3" />
-          <Text style={styles.monthText}>
-            {ITALIAN_MONTHS[selectedMonth - 1]} {currentYear}
-          </Text>
-          <Ionicons name="chevron-down" size={20} color="#666" />
-        </TouchableOpacity>
+        <View style={styles.dateSelectors}>
+          <TouchableOpacity
+            style={styles.monthButton}
+            onPress={() => setShowMonthPicker(true)}
+          >
+            <Text style={styles.monthText}>
+              {ITALIAN_MONTHS[selectedMonth - 1]}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color="#666" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.yearButton}
+            onPress={() => setShowYearPicker(true)}
+          >
+            <Text style={styles.yearText}>
+              {selectedYear}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color="#666" />
+          </TouchableOpacity>
+        </View>
         <View style={styles.headerRight}>
           <Text style={styles.employeeName}>{appInfo?.employee_name}</Text>
           <Text style={styles.matricola}>{appInfo?.matricola}</Text>
@@ -615,9 +631,9 @@ export default function TimesheetApp() {
             <View style={styles.inputValue}>
               <Text style={[
                 styles.inputValueText,
-                isWeekend(selectedDay, selectedMonth, currentYear) && styles.weekendText
+                isWeekend(selectedDay, selectedMonth, selectedYear) && styles.weekendText
               ]}>
-                {selectedDay} - {getDayOfWeekName(selectedDay, selectedMonth, currentYear)}
+                {selectedDay} - {getDayOfWeekName(selectedDay, selectedMonth, selectedYear)}
               </Text>
               <Ionicons name="chevron-forward" size={20} color="#999" />
             </View>
@@ -703,19 +719,19 @@ export default function TimesheetApp() {
                 >
                   <View style={[
                     styles.entryDay,
-                    isWeekend(entry.day, selectedMonth, currentYear) && styles.entryDayWeekend
+                    isWeekend(entry.day, selectedMonth, selectedYear) && styles.entryDayWeekend
                   ]}>
                     <Text style={[
                       styles.entryDayNumber,
-                      isWeekend(entry.day, selectedMonth, currentYear) && styles.entryDayWeekendText
+                      isWeekend(entry.day, selectedMonth, selectedYear) && styles.entryDayWeekendText
                     ]}>
                       {entry.day}
                     </Text>
                     <Text style={[
                       styles.entryDayName,
-                      isWeekend(entry.day, selectedMonth, currentYear) && styles.entryDayWeekendText
+                      isWeekend(entry.day, selectedMonth, selectedYear) && styles.entryDayWeekendText
                     ]}>
-                      {ITALIAN_DAYS_SHORT[new Date(currentYear, selectedMonth - 1, entry.day).getDay()]}
+                      {ITALIAN_DAYS_SHORT[new Date(selectedYear, selectedMonth - 1, entry.day).getDay()]}
                     </Text>
                   </View>
                   <View style={styles.entryDetails}>
@@ -796,6 +812,43 @@ export default function TimesheetApp() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Year Picker Modal */}
+      <Modal visible={showYearPicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowYearPicker(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Seleziona Anno</Text>
+            <FlatList
+              data={availableYears}
+              keyExtractor={(item) => item.toString()}
+              numColumns={3}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.yearItem,
+                    selectedYear === item && styles.yearItemSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedYear(item);
+                    setShowYearPicker(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.yearItemText,
+                    selectedYear === item && styles.yearItemTextSelected
+                  ]}>
+                    {item}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Day Picker Modal */}
       <Modal visible={showDayPicker} transparent animationType="fade">
         <TouchableOpacity
@@ -810,7 +863,7 @@ export default function TimesheetApp() {
               keyExtractor={(item) => item.toString()}
               numColumns={7}
               renderItem={({ item }) => {
-                const weekend = isWeekend(item, selectedMonth, currentYear);
+                const weekend = isWeekend(item, selectedMonth, selectedYear);
                 return (
                   <TouchableOpacity
                     style={[
@@ -835,7 +888,7 @@ export default function TimesheetApp() {
                       selectedDay === item && styles.dayItemTextSelected,
                       weekend && styles.dayItemTextWeekend
                     ]}>
-                      {ITALIAN_DAYS_SHORT[new Date(currentYear, selectedMonth - 1, item).getDay()]}
+                      {ITALIAN_DAYS_SHORT[new Date(selectedYear, selectedMonth - 1, item).getDay()]}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -918,7 +971,7 @@ export default function TimesheetApp() {
           onPress={() => setShowArchive(false)}
         >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Archivio Timesheet {currentYear}</Text>
+            <Text style={styles.modalTitle}>Archivio Timesheet {selectedYear}</Text>
             <ScrollView style={styles.archiveList}>
               {ITALIAN_MONTHS.map((month, index) => {
                 const hasData = archivedTimesheets.some(t => t.month === index + 1);
@@ -1007,7 +1060,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1976D2',
-    marginHorizontal: 8,
+    marginRight: 4,
+  },
+  yearButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff3e0',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  yearText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#E65100',
+    marginRight: 4,
+  },
+  dateSelectors: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerRight: {
     alignItems: 'flex-end',
@@ -1260,6 +1332,26 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   monthItemTextSelected: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  yearItem: {
+    flex: 1,
+    padding: 14,
+    margin: 4,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+  },
+  yearItemSelected: {
+    backgroundColor: '#E65100',
+  },
+  yearItemText: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  yearItemTextSelected: {
     color: '#fff',
     fontWeight: 'bold',
   },

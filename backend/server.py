@@ -38,7 +38,6 @@ api_router = APIRouter(prefix="/api")
 # Employee info - fixed
 EMPLOYEE_NAME = "Igor Martignoni"
 MATRICOLA = "546"
-CURRENT_YEAR = 2025
 
 # Italian day names
 ITALIAN_DAYS = ["Lu", "Ma", "Me", "Gi", "Ve", "Sa", "Do"]
@@ -54,6 +53,7 @@ class TimesheetRow(BaseModel):
 
 class TimesheetCreate(BaseModel):
     month: int  # 1-12
+    year: int  # Anno
     rows: List[TimesheetRow]
 
 class TimesheetUpdate(BaseModel):
@@ -62,7 +62,7 @@ class TimesheetUpdate(BaseModel):
 class Timesheet(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     month: int
-    year: int = CURRENT_YEAR
+    year: int
     employee_name: str = EMPLOYEE_NAME
     matricola: str = MATRICOLA
     rows: List[TimesheetRow]
@@ -84,10 +84,11 @@ async def root():
 
 @api_router.get("/info")
 async def get_info():
+    current_year = datetime.now().year
     return {
         "employee_name": EMPLOYEE_NAME,
         "matricola": MATRICOLA,
-        "current_year": CURRENT_YEAR,
+        "current_year": current_year,
         "months": ITALIAN_MONTHS
     }
 
@@ -117,16 +118,19 @@ async def delete_commessa(commessa_id: str):
 
 # Timesheet endpoints
 @api_router.get("/timesheets", response_model=List[Timesheet])
-async def get_timesheets():
-    timesheets = await db.timesheets.find({"year": CURRENT_YEAR}).sort("month", 1).to_list(100)
+async def get_timesheets(year: Optional[int] = None):
+    query = {}
+    if year:
+        query["year"] = year
+    timesheets = await db.timesheets.find(query).sort([("year", -1), ("month", 1)]).to_list(100)
     return [Timesheet(**t) for t in timesheets]
 
-@api_router.get("/timesheets/{month}", response_model=Optional[Timesheet])
-async def get_timesheet(month: int):
+@api_router.get("/timesheets/{year}/{month}", response_model=Optional[Timesheet])
+async def get_timesheet(year: int, month: int):
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
     
-    timesheet = await db.timesheets.find_one({"month": month, "year": CURRENT_YEAR})
+    timesheet = await db.timesheets.find_one({"month": month, "year": year})
     if timesheet:
         return Timesheet(**timesheet)
     return None
@@ -145,7 +149,7 @@ async def create_or_update_timesheet(input: TimesheetCreate):
                 await db.commesse.insert_one(commessa.dict())
     
     # Check if timesheet exists
-    existing = await db.timesheets.find_one({"month": input.month, "year": CURRENT_YEAR})
+    existing = await db.timesheets.find_one({"month": input.month, "year": input.year})
     
     if existing:
         # Update
@@ -163,32 +167,33 @@ async def create_or_update_timesheet(input: TimesheetCreate):
         # Create new
         timesheet = Timesheet(
             month=input.month,
+            year=input.year,
             rows=input.rows
         )
         await db.timesheets.insert_one(timesheet.dict())
         return timesheet
 
-@api_router.delete("/timesheets/{month}")
-async def delete_timesheet(month: int):
-    result = await db.timesheets.delete_one({"month": month, "year": CURRENT_YEAR})
+@api_router.delete("/timesheets/{year}/{month}")
+async def delete_timesheet(year: int, month: int):
+    result = await db.timesheets.delete_one({"month": month, "year": year})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Timesheet not found")
     return {"message": "Timesheet deleted"}
 
 # PDF Generation
-def get_days_in_month(month: int, year: int = CURRENT_YEAR):
+def get_days_in_month(month: int, year: int):
     return calendar.monthrange(year, month)[1]
 
-def get_day_of_week(day: int, month: int, year: int = CURRENT_YEAR):
+def get_day_of_week(day: int, month: int, year: int):
     """Returns 0=Monday, 6=Sunday"""
     return calendar.weekday(year, month, day)
 
-@api_router.get("/timesheets/{month}/pdf")
-async def generate_pdf(month: int):
+@api_router.get("/timesheets/{year}/{month}/pdf")
+async def generate_pdf(year: int, month: int):
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
     
-    timesheet = await db.timesheets.find_one({"month": month, "year": CURRENT_YEAR})
+    timesheet = await db.timesheets.find_one({"month": month, "year": year})
     
     # Create PDF buffer
     buffer = BytesIO()
@@ -233,16 +238,16 @@ async def generate_pdf(month: int):
     employee_name_upper = f"{EMPLOYEE_NAME.upper()}  {MATRICOLA}"
     
     elements.append(Paragraph(f"<b>{employee_name_upper}</b>", name_style))
-    elements.append(Paragraph(f"<b>{month_name} {CURRENT_YEAR}</b>", month_style))
+    elements.append(Paragraph(f"<b>{month_name} {year}</b>", month_style))
     
     # Calculate days
-    num_days = get_days_in_month(month)
+    num_days = get_days_in_month(month, year)
     
     # Build table header
     # Row 1: Day names (Lu, Ma, etc.)
     day_names_row = [""]
     for day in range(1, num_days + 1):
-        dow = get_day_of_week(day, month)
+        dow = get_day_of_week(day, month, year)
         day_names_row.append(ITALIAN_DAYS[dow])
     day_names_row.append("Tot. Ore")
     
@@ -339,7 +344,7 @@ async def generate_pdf(month: int):
     
     # Highlight weekends (Saturday and Sunday) in red
     for day in range(1, num_days + 1):
-        dow = get_day_of_week(day, month)
+        dow = get_day_of_week(day, month, year)
         if dow >= 5:  # Saturday (5) or Sunday (6)
             col_idx = day  # +1 for commessa column, but day is 1-indexed so it equals out
             style.add('TEXTCOLOR', (col_idx, 1), (col_idx, 1), colors.red)
@@ -357,15 +362,15 @@ async def generate_pdf(month: int):
     # Return as base64 for preview or as file for download
     return {
         "pdf_base64": base64.b64encode(pdf_data).decode('utf-8'),
-        "filename": f"timesheet_{month_name}_{CURRENT_YEAR}.pdf"
+        "filename": f"timesheet_{month_name}_{year}.pdf"
     }
 
-@api_router.get("/timesheets/{month}/pdf/download")
-async def download_pdf(month: int):
+@api_router.get("/timesheets/{year}/{month}/pdf/download")
+async def download_pdf(year: int, month: int):
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
     
-    result = await generate_pdf(month)
+    result = await generate_pdf(year, month)
     pdf_data = base64.b64decode(result["pdf_base64"])
     
     return StreamingResponse(
