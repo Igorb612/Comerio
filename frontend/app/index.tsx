@@ -900,14 +900,15 @@ export default function TimesheetApp() {
 
       {/* Commessa Picker Modal */}
       <Modal visible={showCommessaPicker} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => {
-            setShowCommessaPicker(false);
-            setNewCommessaInput('');
-          }}
-        >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setShowCommessaPicker(false);
+              setNewCommessaInput('');
+            }}
+          />
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Seleziona Commessa</Text>
             
@@ -918,6 +919,7 @@ export default function TimesheetApp() {
                 onChangeText={setNewCommessaInput}
                 placeholder="Nuova commessa..."
                 placeholderTextColor="#999"
+                autoFocus={false}
               />
               <TouchableOpacity
                 style={styles.addCommessaButton}
@@ -960,7 +962,7 @@ export default function TimesheetApp() {
               Tieni premuto su una commessa per eliminarla
             </Text>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* Archive Modal */}
@@ -1300,6 +1302,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   modalContent: {
     backgroundColor: '#fff',
