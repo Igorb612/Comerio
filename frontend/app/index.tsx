@@ -931,25 +931,31 @@ export default function TimesheetApp() {
             
             <ScrollView style={styles.commessaList}>
               {commesse.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[
-                    styles.commessaItem,
-                    selectedCommessa === c.name && styles.commessaItemSelected
-                  ]}
-                  onPress={() => selectCommessa(c.name)}
-                  onLongPress={() => deleteCommessa(c)}
-                >
-                  <Text style={[
-                    styles.commessaItemText,
-                    selectedCommessa === c.name && styles.commessaItemTextSelected
-                  ]}>
-                    {c.name}
-                  </Text>
-                  {selectedCommessa === c.name && (
-                    <Ionicons name="checkmark" size={20} color="#2196F3" />
-                  )}
-                </TouchableOpacity>
+                <View key={c.id} style={styles.commessaItemContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.commessaItem,
+                      selectedCommessa === c.name && styles.commessaItemSelected
+                    ]}
+                    onPress={() => selectCommessa(c.name)}
+                  >
+                    <Text style={[
+                      styles.commessaItemText,
+                      selectedCommessa === c.name && styles.commessaItemTextSelected
+                    ]}>
+                      {c.name}
+                    </Text>
+                    {selectedCommessa === c.name && (
+                      <Ionicons name="checkmark" size={20} color="#2196F3" />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteCommessaButton}
+                    onPress={() => deleteCommessa(c)}
+                  >
+                    <Ionicons name="trash-outline" size={20} color="#e53935" />
+                  </TouchableOpacity>
+                </View>
               ))}
               {commesse.length === 0 && (
                 <Text style={styles.noCommesseText}>
@@ -957,10 +963,6 @@ export default function TimesheetApp() {
                 </Text>
               )}
             </ScrollView>
-            
-            <Text style={styles.hintTextModal}>
-              Tieni premuto su una commessa per eliminarla
-            </Text>
           </View>
         </View>
       </Modal>
@@ -1420,13 +1422,18 @@ const styles = StyleSheet.create({
   commessaList: {
     maxHeight: 300,
   },
+  commessaItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
   commessaItem: {
+    flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
     borderRadius: 8,
   },
   commessaItemSelected: {
@@ -1439,6 +1446,10 @@ const styles = StyleSheet.create({
   commessaItemTextSelected: {
     color: '#1976D2',
     fontWeight: '500',
+  },
+  deleteCommessaButton: {
+    padding: 12,
+    marginRight: 4,
   },
   noCommesseText: {
     textAlign: 'center',
