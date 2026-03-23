@@ -521,37 +521,59 @@ export default function TimesheetApp() {
   };
 
   const deleteCommessa = async (commessa: Commessa) => {
-    Alert.alert(
-      'Elimina Commessa',
-      `Vuoi eliminare la commessa "${commessa.name}"?`,
-      [
-        { text: 'Annulla', style: 'cancel' },
-        {
-          text: 'Elimina',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const response = await fetch(`${API_URL}/api/commesse/${commessa.id}`, {
-                method: 'DELETE',
-              });
-              if (response.ok) {
-                // Remove from local state
-                setCommesse(commesse.filter(c => c.id !== commessa.id));
-                // Clear selection if this commessa was selected
-                if (selectedCommessa === commessa.name) {
-                  setSelectedCommessa('');
+    if (Platform.OS === 'web') {
+      // Use window.confirm for web
+      const confirmed = window.confirm(`Vuoi eliminare la commessa "${commessa.name}"?`);
+      if (confirmed) {
+        try {
+          const response = await fetch(`${API_URL}/api/commesse/${commessa.id}`, {
+            method: 'DELETE',
+          });
+          if (response.ok) {
+            setCommesse(commesse.filter(c => c.id !== commessa.id));
+            if (selectedCommessa === commessa.name) {
+              setSelectedCommessa('');
+            }
+          } else {
+            alert('Errore durante l\'eliminazione');
+          }
+        } catch (error) {
+          console.error('Error deleting commessa:', error);
+          alert('Errore durante l\'eliminazione');
+        }
+      }
+    } else {
+      // Use Alert for mobile
+      Alert.alert(
+        'Elimina Commessa',
+        `Vuoi eliminare la commessa "${commessa.name}"?`,
+        [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Elimina',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const response = await fetch(`${API_URL}/api/commesse/${commessa.id}`, {
+                  method: 'DELETE',
+                });
+                if (response.ok) {
+                  setCommesse(commesse.filter(c => c.id !== commessa.id));
+                  if (selectedCommessa === commessa.name) {
+                    setSelectedCommessa('');
+                  }
+                } else {
+                  Alert.alert('Errore', 'Errore durante l\'eliminazione');
                 }
-              } else {
+              } catch (error) {
+                console.error('Error deleting commessa:', error);
                 Alert.alert('Errore', 'Errore durante l\'eliminazione');
               }
-            } catch (error) {
-              console.error('Error deleting commessa:', error);
-              Alert.alert('Errore', 'Errore durante l\'eliminazione');
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const addNewCommessa = () => {
