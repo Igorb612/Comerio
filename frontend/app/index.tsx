@@ -205,15 +205,46 @@ export default function TimesheetApp() {
     }
     
     const hours = parseFloat(hoursInput.replace(',', '.')) || 0;
-    if (hours <= 0) {
-      Alert.alert('Errore', 'Inserisci le ore lavorate');
-      return;
-    }
-
+    
     // Find or create row for this commessa
     let newRows = [...rows];
     let rowIndex = newRows.findIndex(r => r.commessa === selectedCommessa);
     
+    if (hours === 0) {
+      // If hours is 0, remove the entry for that day
+      if (rowIndex !== -1) {
+        newRows[rowIndex].hours[selectedDay - 1] = 0;
+        
+        // Remove row if all hours are 0
+        const totalHours = newRows[rowIndex].hours.reduce((sum, h) => sum + h, 0);
+        if (totalHours === 0) {
+          newRows = newRows.filter((_, i) => i !== rowIndex);
+        }
+        
+        const success = await saveTimesheet(newRows);
+        if (success) {
+          setRows(newRows);
+          setHoursInput('');
+          if (Platform.OS === 'web') {
+            alert(`Ore per ${selectedCommessa} del giorno ${selectedDay} eliminate`);
+          } else {
+            Alert.alert('Eliminato', `Ore per ${selectedCommessa} del giorno ${selectedDay} eliminate`);
+          }
+        } else {
+          Alert.alert('Errore', 'Errore durante il salvataggio');
+        }
+      } else {
+        // No entry exists for this commessa, nothing to delete
+        if (Platform.OS === 'web') {
+          alert('Nessun dato da eliminare per questa commessa e giorno');
+        } else {
+          Alert.alert('Info', 'Nessun dato da eliminare per questa commessa e giorno');
+        }
+      }
+      return;
+    }
+    
+    // Normal case: add or update hours
     if (rowIndex === -1) {
       // Create new row
       newRows.push({
@@ -223,6 +254,10 @@ export default function TimesheetApp() {
       rowIndex = newRows.length - 1;
     }
 
+    // Check if we're updating an existing entry
+    const existingHours = newRows[rowIndex].hours[selectedDay - 1];
+    const isUpdate = existingHours > 0;
+
     // Update hours for the selected day
     newRows[rowIndex].hours[selectedDay - 1] = hours;
     
@@ -231,7 +266,14 @@ export default function TimesheetApp() {
     if (success) {
       setRows(newRows);
       setHoursInput('');
-      Alert.alert('Salvato', `${hours.toString().replace('.', ',')} ore per ${selectedCommessa} il giorno ${selectedDay}`);
+      const message = isUpdate 
+        ? `Modificato: ${hours.toString().replace('.', ',')} ore per ${selectedCommessa} il giorno ${selectedDay}`
+        : `Salvato: ${hours.toString().replace('.', ',')} ore per ${selectedCommessa} il giorno ${selectedDay}`;
+      if (Platform.OS === 'web') {
+        alert(message);
+      } else {
+        Alert.alert(isUpdate ? 'Modificato' : 'Salvato', message);
+      }
     } else {
       Alert.alert('Errore', 'Errore durante il salvataggio');
     }
