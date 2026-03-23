@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import * as MailComposer from 'expo-mail-composer';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -514,6 +515,82 @@ export default function TimesheetApp() {
     }
   };
 
+  const handleSendEmail = async () => {
+    setPdfLoading(true);
+    try {
+      const monthName = ITALIAN_MONTHS[selectedMonth - 1];
+      const subject = `Timesheet ${monthName} ${selectedYear} - ${appInfo?.employee_name}`;
+      const body = `In allegato il timesheet di ${monthName} ${selectedYear}.\n\nTotale ore: ${formatHours(totalHours)}\n\nCordiali saluti,\n${appInfo?.employee_name}`;
+      
+      if (Platform.OS === 'web') {
+        // For web, download PDF first then open mailto
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          
+          // Download the file
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = data.filename;
+          link.click();
+          
+          // Open email client
+          setTimeout(() => {
+            const mailtoUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+            window.open(mailtoUrl, '_blank');
+            alert('PDF scaricato. Allega il file all\'email che si è aperta.');
+          }, 500);
+        }
+      } else {
+        // For mobile - use MailComposer with PDF attachment
+        const isAvailable = await MailComposer.isAvailableAsync();
+        
+        if (isAvailable) {
+          // Generate PDF locally
+          const html = generatePdfHtml();
+          const { uri } = await Print.printToFileAsync({
+            html: html,
+            width: 842,
+            height: 595,
+          });
+          
+          await MailComposer.composeAsync({
+            subject: subject,
+            body: body,
+            attachments: [uri],
+          });
+        } else {
+          // Fallback to sharing
+          const html = generatePdfHtml();
+          const { uri } = await Print.printToFileAsync({
+            html: html,
+            width: 842,
+            height: 595,
+          });
+          
+          await Sharing.shareAsync(uri, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Invia Timesheet via Email',
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error sending email:', error);
+      Alert.alert('Errore', 'Errore durante l\'invio email. Riprova.');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const selectCommessa = (commessa: string) => {
     setSelectedCommessa(commessa);
     setShowCommessaPicker(false);
@@ -783,22 +860,27 @@ export default function TimesheetApp() {
       {/* Bottom Toolbar */}
       <View style={styles.bottomToolbar}>
         <TouchableOpacity style={styles.bottomButton} onPress={handlePreviewPDF} disabled={pdfLoading}>
-          <Ionicons name="eye" size={22} color="#FF9800" />
+          <Ionicons name="eye" size={20} color="#FF9800" />
           <Text style={styles.bottomButtonText}>Anteprima</Text>
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.bottomButton} onPress={handleDownloadPDF} disabled={pdfLoading}>
-          <Ionicons name="download" size={22} color="#9C27B0" />
-          <Text style={styles.bottomButtonText}>Stampa PDF</Text>
+          <Ionicons name="download" size={20} color="#9C27B0" />
+          <Text style={styles.bottomButtonText}>Stampa</Text>
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.bottomButton} onPress={handleShareWhatsApp} disabled={pdfLoading}>
-          <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
-          <Text style={styles.bottomButtonText}>Invia PDF</Text>
+          <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+          <Text style={styles.bottomButtonText}>WhatsApp</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.bottomButton} onPress={handleSendEmail} disabled={pdfLoading}>
+          <Ionicons name="mail" size={20} color="#EA4335" />
+          <Text style={styles.bottomButtonText}>Email</Text>
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.bottomButton} onPress={openArchive}>
-          <Ionicons name="archive" size={22} color="#607D8B" />
+          <Ionicons name="archive" size={20} color="#607D8B" />
           <Text style={styles.bottomButtonText}>Archivio</Text>
         </TouchableOpacity>
       </View>
