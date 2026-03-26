@@ -508,50 +508,70 @@ export default function TimesheetApp() {
   const handleShareWhatsApp = async () => {
     setPdfLoading(true);
     try {
-      if (Platform.OS === 'web') {
-        // For web, use backend PDF
-        const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
-        const data = await response.json();
-        
-        if (data.pdf_base64) {
-          const byteCharacters = atob(data.pdf_base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = data.filename;
-          link.click();
-          
-          setTimeout(() => {
-            window.open('https://web.whatsapp.com/', '_blank');
-            Alert.alert('PDF Scaricato', 'Allega il PDF scaricato nella chat WhatsApp.');
-          }, 500);
+      // Get PDF from backend
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        const byteCharacters = atob(data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
-      } else {
-        // For mobile - generate PDF locally with expo-print
-        const html = generatePdfHtml();
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const file = new File([blob], data.filename, { type: 'application/pdf' });
         
-        const { uri } = await Print.printToFileAsync({
-          html: html,
-          width: 842,  // A4 landscape width in points
-          height: 595, // A4 landscape height in points
-        });
-        
-        // Share the generated PDF
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
-          dialogTitle: 'Invia Timesheet via WhatsApp',
-        });
+        if (Platform.OS === 'web') {
+          // Try Web Share API first (works on mobile browsers)
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${selectedYear}`,
+                text: `Timesheet ${appInfo?.employee_name} - ${ITALIAN_MONTHS[selectedMonth - 1]} ${selectedYear}`,
+              });
+            } catch (shareError) {
+              // User cancelled or share failed, fallback to download
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = data.filename;
+              link.click();
+              alert('PDF scaricato. Condividilo manualmente su WhatsApp.');
+            }
+          } else {
+            // Fallback for desktop: download and open WhatsApp Web
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = data.filename;
+            link.click();
+            
+            setTimeout(() => {
+              window.open('https://web.whatsapp.com/', '_blank');
+              alert('PDF scaricato. Allega il PDF nella chat WhatsApp.');
+            }, 500);
+          }
+        } else {
+          // For Expo native - generate PDF locally with expo-print
+          const html = generatePdfHtml();
+          
+          const { uri } = await Print.printToFileAsync({
+            html: html,
+            width: 842,
+            height: 595,
+          });
+          
+          await Sharing.shareAsync(uri, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Invia Timesheet via WhatsApp',
+          });
+        }
       }
     } catch (error) {
       console.error('Error sharing PDF:', error);
-      Alert.alert('Errore', 'Errore durante la creazione del PDF. Riprova.');
+      alert('Errore durante la condivisione. Riprova.');
     } finally {
       setPdfLoading(false);
     }
@@ -564,70 +584,92 @@ export default function TimesheetApp() {
       const subject = `Timesheet ${monthName} ${selectedYear} - ${appInfo?.employee_name}`;
       const body = `In allegato il timesheet di ${monthName} ${selectedYear}.\n\nTotale ore: ${formatHours(totalHours)}\n\nCordiali saluti,\n${appInfo?.employee_name}`;
       
-      if (Platform.OS === 'web') {
-        // For web, download PDF first then open mailto
-        const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
-        const data = await response.json();
-        
-        if (data.pdf_base64) {
-          const byteCharacters = atob(data.pdf_base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          
-          // Download the file
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = data.filename;
-          link.click();
-          
-          // Open email client
-          setTimeout(() => {
-            const mailtoUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-            window.open(mailtoUrl, '_blank');
-            alert('PDF scaricato. Allega il file all\'email che si è aperta.');
-          }, 500);
+      // Get PDF from backend
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        const byteCharacters = atob(data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
-      } else {
-        // For mobile - use MailComposer with PDF attachment
-        const isAvailable = await MailComposer.isAvailableAsync();
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const file = new File([blob], data.filename, { type: 'application/pdf' });
         
-        if (isAvailable) {
-          // Generate PDF locally
-          const html = generatePdfHtml();
-          const { uri } = await Print.printToFileAsync({
-            html: html,
-            width: 842,
-            height: 595,
-          });
-          
-          await MailComposer.composeAsync({
-            subject: subject,
-            body: body,
-            attachments: [uri],
-          });
+        if (Platform.OS === 'web') {
+          // Try Web Share API first (works on mobile browsers)
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: subject,
+                text: body,
+              });
+            } catch (shareError) {
+              // User cancelled or share failed, fallback to download
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = data.filename;
+              link.click();
+              
+              setTimeout(() => {
+                const mailtoUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                window.location.href = mailtoUrl;
+                alert('PDF scaricato. Allegalo all\'email.');
+              }, 500);
+            }
+          } else {
+            // Fallback for desktop: download and open mailto
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = data.filename;
+            link.click();
+            
+            setTimeout(() => {
+              const mailtoUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+              window.location.href = mailtoUrl;
+              alert('PDF scaricato. Allegalo all\'email.');
+            }, 500);
+          }
         } else {
-          // Fallback to sharing
-          const html = generatePdfHtml();
-          const { uri } = await Print.printToFileAsync({
-            html: html,
-            width: 842,
-            height: 595,
-          });
+          // For Expo native - use MailComposer with PDF attachment
+          const isAvailable = await MailComposer.isAvailableAsync();
           
-          await Sharing.shareAsync(uri, {
-            mimeType: 'application/pdf',
-            dialogTitle: 'Invia Timesheet via Email',
-          });
+          if (isAvailable) {
+            const html = generatePdfHtml();
+            const { uri } = await Print.printToFileAsync({
+              html: html,
+              width: 842,
+              height: 595,
+            });
+            
+            await MailComposer.composeAsync({
+              subject: subject,
+              body: body,
+              attachments: [uri],
+            });
+          } else {
+            const html = generatePdfHtml();
+            const { uri } = await Print.printToFileAsync({
+              html: html,
+              width: 842,
+              height: 595,
+            });
+            
+            await Sharing.shareAsync(uri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Invia Timesheet via Email',
+            });
+          }
         }
       }
     } catch (error) {
       console.error('Error sending email:', error);
-      Alert.alert('Errore', 'Errore durante l\'invio email. Riprova.');
+      alert('Errore durante l\'invio. Riprova.');
     } finally {
       setPdfLoading(false);
     }
