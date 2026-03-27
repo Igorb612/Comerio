@@ -943,6 +943,8 @@ export default function TimesheetApp() {
               maxLength={5}
             />
           </View>
+          
+          <Text style={styles.hintTextSmall}>Scrivi 0 per cancellare</Text>
 
           {/* Add Button */}
           <TouchableOpacity
@@ -1013,10 +1015,6 @@ export default function TimesheetApp() {
               ))}
             </View>
           )}
-          
-          <Text style={styles.hintText}>
-            Tieni premuto su una voce per eliminarla
-          </Text>
         </View>
       </ScrollView>
 
@@ -1545,6 +1543,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
+  },
+  hintTextSmall: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   addButton: {
     flexDirection: 'row',
