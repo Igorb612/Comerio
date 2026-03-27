@@ -13,6 +13,7 @@ import {
   FlatList,
   Pressable,
   Linking,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import * as FileSystem from 'expo-file-system';
 import * as MailComposer from 'expo-mail-composer';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
 
 // Types
 interface TimesheetRow {
@@ -844,6 +846,15 @@ export default function TimesheetApp() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Logo */}
+      <View style={styles.logoContainer}>
+        <Image
+          source={{ uri: LOGO_URL }}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </View>
+
       {/* User Selector Bar */}
       <TouchableOpacity
         style={styles.userBar}
@@ -1380,6 +1391,18 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
     color: '#666',
+  },
+  logoContainer: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  logo: {
+    width: 200,
+    height: 65,
   },
   header: {
     flexDirection: 'row',
