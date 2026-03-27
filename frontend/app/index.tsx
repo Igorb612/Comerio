@@ -499,7 +499,7 @@ export default function TimesheetApp() {
     }
   };
 
-  const handleDownloadPDF = async () => {
+  const handlePrintPDF = async () => {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
@@ -508,7 +508,7 @@ export default function TimesheetApp() {
       
       if (data.pdf_base64) {
         if (Platform.OS === 'web') {
-          // Download PDF directly
+          // Open PDF in new window and trigger print
           const byteCharacters = atob(data.pdf_base64);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
@@ -517,30 +517,29 @@ export default function TimesheetApp() {
           const byteArray = new Uint8Array(byteNumbers);
           const blob = new Blob([byteArray], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = data.filename;
-          link.click();
+          
+          // Create iframe for printing
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.src = url;
+          document.body.appendChild(iframe);
+          
+          iframe.onload = () => {
+            setTimeout(() => {
+              iframe.contentWindow?.print();
+            }, 500);
+          };
         } else {
-          // For mobile, save file and share
-          if (await Sharing.isAvailableAsync()) {
-            // Create file from base64
-            const fileUri = `${FileSystem.cacheDirectory}${data.filename}`;
-            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-            await Sharing.shareAsync(fileUri, {
-              mimeType: 'application/pdf',
-              dialogTitle: 'Salva o condividi il PDF',
-            });
-          } else {
-            Alert.alert('Info', 'La condivisione non è disponibile su questo dispositivo');
-          }
+          // For mobile, use print
+          await Print.printAsync({
+            uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            orientation: Print.Orientation.landscape,
+          });
         }
       }
     } catch (error) {
-      console.error('Error downloading PDF:', error);
-      Alert.alert('Errore', 'Errore durante il download del PDF');
+      console.error('Error printing PDF:', error);
+      Alert.alert('Errore', 'Errore durante la stampa del PDF');
     } finally {
       setPdfLoading(false);
     }
@@ -1095,8 +1094,8 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Anteprima</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.bottomButton} onPress={handleDownloadPDF} disabled={pdfLoading}>
-          <Ionicons name="download" size={20} color="#9C27B0" />
+        <TouchableOpacity style={styles.bottomButton} onPress={handlePrintPDF} disabled={pdfLoading}>
+          <Ionicons name="print" size={20} color="#9C27B0" />
           <Text style={styles.bottomButtonText}>Stampa</Text>
         </TouchableOpacity>
         
