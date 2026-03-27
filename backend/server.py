@@ -105,6 +105,23 @@ async def get_user(user_id: str):
         return User(**user)
     return None
 
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str):
+    # First check if user exists
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user_name = user["name"]
+    
+    # Delete user
+    await db.users.delete_one({"id": user_id})
+    
+    # Also delete all timesheets for this user
+    await db.timesheets.delete_many({"user_id": user_id})
+    
+    return {"message": f"Utente '{user_name}' e tutti i suoi timesheet eliminati"}
+
 # Routes
 @api_router.get("/")
 async def root():

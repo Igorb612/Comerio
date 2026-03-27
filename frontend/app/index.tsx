@@ -181,6 +181,65 @@ export default function TimesheetApp() {
     }
   };
 
+  const deleteUser = async (user: User) => {
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`);
+      if (confirmed) {
+        try {
+          const response = await fetch(`${API_URL}/api/users/${user.id}`, {
+            method: 'DELETE',
+          });
+          if (response.ok) {
+            const updatedUsers = users.filter(u => u.id !== user.id);
+            setUsers(updatedUsers);
+            // If deleted user was selected, select another one or null
+            if (selectedUser?.id === user.id) {
+              setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
+            }
+            alert('Utente e tutti i dati relativi eliminati');
+          } else {
+            alert('Errore durante l\'eliminazione');
+          }
+        } catch (error) {
+          console.error('Error deleting user:', error);
+          alert('Errore durante l\'eliminazione');
+        }
+      }
+    } else {
+      Alert.alert(
+        'Elimina Utente',
+        `Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`,
+        [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Elimina',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const response = await fetch(`${API_URL}/api/users/${user.id}`, {
+                  method: 'DELETE',
+                });
+                if (response.ok) {
+                  const updatedUsers = users.filter(u => u.id !== user.id);
+                  setUsers(updatedUsers);
+                  if (selectedUser?.id === user.id) {
+                    setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
+                  }
+                  Alert.alert('Eliminato', 'Utente e tutti i dati relativi eliminati');
+                } else {
+                  Alert.alert('Errore', 'Errore durante l\'eliminazione');
+                }
+              } catch (error) {
+                console.error('Error deleting user:', error);
+                Alert.alert('Errore', 'Errore durante l\'eliminazione');
+              }
+            }
+          }
+        ]
+      );
+    }
+  };
+
   const fetchCommesse = async () => {
     try {
       const response = await fetch(`${API_URL}/api/commesse`);
@@ -1285,32 +1344,42 @@ export default function TimesheetApp() {
             
             <ScrollView style={styles.commessaList}>
               {users.map((user) => (
-                <TouchableOpacity
+                <View
                   key={user.id}
                   style={[
                     styles.commessaItem,
                     selectedUser?.id === user.id && styles.commessaItemSelected
                   ]}
-                  onPress={() => {
-                    setSelectedUser(user);
-                    setShowUserPicker(false);
-                    setNewUserInput('');
-                  }}
                 >
-                  <View style={styles.userItemLeft}>
-                    <Ionicons name="person" size={20} color={selectedUser?.id === user.id ? '#1976D2' : '#666'} />
-                    <Text style={[
-                      styles.commessaItemText,
-                      selectedUser?.id === user.id && styles.commessaItemTextSelected,
-                      { marginLeft: 10 }
-                    ]}>
-                      {user.name}
-                    </Text>
-                  </View>
-                  {selectedUser?.id === user.id && (
-                    <Ionicons name="checkmark" size={20} color="#2196F3" />
-                  )}
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.userItemContent}
+                    onPress={() => {
+                      setSelectedUser(user);
+                      setShowUserPicker(false);
+                      setNewUserInput('');
+                    }}
+                  >
+                    <View style={styles.userItemLeft}>
+                      <Ionicons name="person" size={20} color={selectedUser?.id === user.id ? '#1976D2' : '#666'} />
+                      <Text style={[
+                        styles.commessaItemText,
+                        selectedUser?.id === user.id && styles.commessaItemTextSelected,
+                        { marginLeft: 10 }
+                      ]}>
+                        {user.name}
+                      </Text>
+                    </View>
+                    {selectedUser?.id === user.id && (
+                      <Ionicons name="checkmark" size={20} color="#2196F3" />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteUserButton}
+                    onPress={() => deleteUser(user)}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#e53935" />
+                  </TouchableOpacity>
+                </View>
               ))}
               {users.length === 0 && (
                 <Text style={styles.noCommesseText}>
@@ -1437,6 +1506,16 @@ const styles = StyleSheet.create({
   userItemLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  userItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  deleteUserButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   monthButton: {
     flexDirection: 'row',
