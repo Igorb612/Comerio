@@ -35,10 +35,6 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Employee info - fixed
-EMPLOYEE_NAME = "Igor Martignoni"
-MATRICOLA = "546"
-
 # Italian day names
 ITALIAN_DAYS = ["Lu", "Ma", "Me", "Gi", "Ve", "Sa", "Do"]
 ITALIAN_MONTHS = [
@@ -47,11 +43,20 @@ ITALIAN_MONTHS = [
 ]
 
 # Models
+class UserCreate(BaseModel):
+    name: str
+
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 class TimesheetRow(BaseModel):
     commessa: str
     hours: List[float]  # 31 elements for max days in month
 
 class TimesheetCreate(BaseModel):
+    user_id: str
     month: int  # 1-12
     year: int  # Anno
     rows: List[TimesheetRow]
@@ -61,10 +66,9 @@ class TimesheetUpdate(BaseModel):
 
 class Timesheet(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str = Field(default="default")  # Default user for backwards compatibility
     month: int
     year: int
-    employee_name: str = EMPLOYEE_NAME
-    matricola: str = MATRICOLA
     rows: List[TimesheetRow]
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -77,17 +81,39 @@ class Commessa(BaseModel):
     name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+# User endpoints
+@api_router.get("/users", response_model=List[User])
+async def get_users():
+    users = await db.users.find().sort("name", 1).to_list(1000)
+    return [User(**u) for u in users]
+
+@api_router.post("/users", response_model=User)
+async def create_user(input: UserCreate):
+    # Check if already exists
+    existing = await db.users.find_one({"name": input.name})
+    if existing:
+        return User(**existing)
+    
+    user = User(name=input.name)
+    await db.users.insert_one(user.dict())
+    return user
+
+@api_router.get("/users/{user_id}", response_model=Optional[User])
+async def get_user(user_id: str):
+    user = await db.users.find_one({"id": user_id})
+    if user:
+        return User(**user)
+    return None
+
 # Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Timesheet API", "employee": EMPLOYEE_NAME, "matricola": MATRICOLA}
+    return {"message": "Timesheet API Multi-User"}
 
 @api_router.get("/info")
 async def get_info():
     current_year = datetime.now().year
     return {
-        "employee_name": EMPLOYEE_NAME,
-        "matricola": MATRICOLA,
         "current_year": current_year,
         "months": ITALIAN_MONTHS
     }
@@ -137,23 +163,25 @@ async def delete_commessa(commessa_id: str):
     
     return {"message": f"Commessa '{commessa_name}' e tutti i dati relativi eliminati"}
 
-# Timesheet endpoints
+# Timesheet endpoints - now per user
 @api_router.get("/timesheets", response_model=List[Timesheet])
-async def get_timesheets(year: Optional[int] = None):
+async def get_timesheets(user_id: Optional[str] = None, year: Optional[int] = None):
     query = {}
+    if user_id:
+        query["user_id"] = user_id
     if year:
         query["year"] = year
     timesheets = await db.timesheets.find(query).sort([("year", -1), ("month", 1)]).to_list(100)
-    return [Timesheet(**t) for t in timesheets]
+    return [Timesheet(**{**t, "user_id": t.get("user_id", "default")}) for t in timesheets]
 
-@api_router.get("/timesheets/{year}/{month}", response_model=Optional[Timesheet])
-async def get_timesheet(year: int, month: int):
+@api_router.get("/timesheets/{user_id}/{year}/{month}", response_model=Optional[Timesheet])
+async def get_timesheet(user_id: str, year: int, month: int):
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
     
-    timesheet = await db.timesheets.find_one({"month": month, "year": year})
+    timesheet = await db.timesheets.find_one({"user_id": user_id, "month": month, "year": year})
     if timesheet:
-        return Timesheet(**timesheet)
+        return Timesheet(**{**timesheet, "user_id": timesheet.get("user_id", "default")})
     return None
 
 @api_router.post("/timesheets", response_model=Timesheet)
@@ -169,8 +197,12 @@ async def create_or_update_timesheet(input: TimesheetCreate):
                 commessa = Commessa(name=row.commessa)
                 await db.commesse.insert_one(commessa.dict())
     
-    # Check if timesheet exists
-    existing = await db.timesheets.find_one({"month": input.month, "year": input.year})
+    # Check if timesheet exists for this user/month/year
+    existing = await db.timesheets.find_one({
+        "user_id": input.user_id,
+        "month": input.month, 
+        "year": input.year
+    })
     
     if existing:
         # Update
@@ -183,10 +215,11 @@ async def create_or_update_timesheet(input: TimesheetCreate):
             {"$set": update_data}
         )
         existing.update(update_data)
-        return Timesheet(**existing)
+        return Timesheet(**{**existing, "user_id": existing.get("user_id", "default")})
     else:
         # Create new
         timesheet = Timesheet(
+            user_id=input.user_id,
             month=input.month,
             year=input.year,
             rows=input.rows
@@ -194,9 +227,9 @@ async def create_or_update_timesheet(input: TimesheetCreate):
         await db.timesheets.insert_one(timesheet.dict())
         return timesheet
 
-@api_router.delete("/timesheets/{year}/{month}")
-async def delete_timesheet(year: int, month: int):
-    result = await db.timesheets.delete_one({"month": month, "year": year})
+@api_router.delete("/timesheets/{user_id}/{year}/{month}")
+async def delete_timesheet(user_id: str, year: int, month: int):
+    result = await db.timesheets.delete_one({"user_id": user_id, "month": month, "year": year})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Timesheet not found")
     return {"message": "Timesheet deleted"}
@@ -209,12 +242,16 @@ def get_day_of_week(day: int, month: int, year: int):
     """Returns 0=Monday, 6=Sunday"""
     return calendar.weekday(year, month, day)
 
-@api_router.get("/timesheets/{year}/{month}/pdf")
-async def generate_pdf(year: int, month: int):
+@api_router.get("/timesheets/{user_id}/{year}/{month}/pdf")
+async def generate_pdf(user_id: str, year: int, month: int):
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
     
-    timesheet = await db.timesheets.find_one({"month": month, "year": year})
+    # Get user info
+    user = await db.users.find_one({"id": user_id})
+    user_name = user["name"] if user else "Utente"
+    
+    timesheet = await db.timesheets.find_one({"user_id": user_id, "month": month, "year": year})
     
     # Create PDF buffer
     buffer = BytesIO()
@@ -256,7 +293,7 @@ async def generate_pdf(year: int, month: int):
     
     # Header with employee name (uppercase) and month
     month_name = ITALIAN_MONTHS[month - 1].capitalize()
-    employee_name_upper = f"{EMPLOYEE_NAME.upper()}  {MATRICOLA}"
+    employee_name_upper = user_name.upper()
     
     elements.append(Paragraph(f"<b>{employee_name_upper}</b>", name_style))
     elements.append(Paragraph(f"<b>{month_name} {year}</b>", month_style))
@@ -386,12 +423,12 @@ async def generate_pdf(year: int, month: int):
         "filename": f"timesheet_{month_name}_{year}.pdf"
     }
 
-@api_router.get("/timesheets/{year}/{month}/pdf/download")
-async def download_pdf(year: int, month: int):
+@api_router.get("/timesheets/{user_id}/{year}/{month}/pdf/download")
+async def download_pdf(user_id: str, year: int, month: int):
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Invalid month")
     
-    result = await generate_pdf(year, month)
+    result = await generate_pdf(user_id, year, month)
     pdf_data = base64.b64decode(result["pdf_base64"])
     
     return StreamingResponse(

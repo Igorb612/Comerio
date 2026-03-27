@@ -43,9 +43,12 @@ interface Commessa {
   name: string;
 }
 
+interface User {
+  id: string;
+  name: string;
+}
+
 interface AppInfo {
-  employee_name: string;
-  matricola: string;
   current_year: number;
   months: string[];
 }
@@ -94,6 +97,12 @@ export default function TimesheetApp() {
   const [archivedTimesheets, setArchivedTimesheets] = useState<Timesheet[]>([]);
   const [pdfLoading, setPdfLoading] = useState(false);
 
+  // User state
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [showUserPicker, setShowUserPicker] = useState(false);
+  const [newUserInput, setNewUserInput] = useState('');
+
   // Entry form state
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
   const [selectedCommessa, setSelectedCommessa] = useState<string>('');
@@ -106,20 +115,23 @@ export default function TimesheetApp() {
 
   const numDays = getDaysInMonth(selectedMonth, selectedYear);
 
-  // Fetch app info
+  // Fetch app info and users on mount
   useEffect(() => {
     fetchAppInfo();
     fetchCommesse();
+    fetchUsers();
   }, []);
 
-  // Fetch timesheet when month or year changes
+  // Fetch timesheet when month, year, or user changes
   useEffect(() => {
-    fetchTimesheet();
+    if (selectedUser) {
+      fetchTimesheet();
+    }
     // Reset selected day if it exceeds days in new month
     if (selectedDay > getDaysInMonth(selectedMonth, selectedYear)) {
       setSelectedDay(1);
     }
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, selectedUser]);
 
   const fetchAppInfo = async () => {
     try {
@@ -128,6 +140,42 @@ export default function TimesheetApp() {
       setAppInfo(data);
     } catch (error) {
       console.error('Error fetching app info:', error);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/users`);
+      const data = await response.json();
+      setUsers(data);
+      // Auto-select first user if available
+      if (data.length > 0 && !selectedUser) {
+        setSelectedUser(data[0]);
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    }
+  };
+
+  const createUser = async (name: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (response.ok) {
+        const newUser = await response.json();
+        setUsers([...users, newUser]);
+        setSelectedUser(newUser);
+        setNewUserInput('');
+        setShowUserPicker(false);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error creating user:', error);
+      return false;
     }
   };
 
@@ -142,9 +190,14 @@ export default function TimesheetApp() {
   };
 
   const fetchTimesheet = async () => {
+    if (!selectedUser) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}`);
       if (response.ok) {
         const data = await response.json();
         if (data) {
@@ -164,8 +217,9 @@ export default function TimesheetApp() {
   };
 
   const fetchArchivedTimesheets = async () => {
+    if (!selectedUser) return;
     try {
-      const response = await fetch(`${API_URL}/api/timesheets`);
+      const response = await fetch(`${API_URL}/api/timesheets?user_id=${selectedUser.id}&year=${selectedYear}`);
       const data = await response.json();
       setArchivedTimesheets(data);
     } catch (error) {
@@ -174,12 +228,14 @@ export default function TimesheetApp() {
   };
 
   const saveTimesheet = async (newRows: TimesheetRow[]) => {
+    if (!selectedUser) return false;
     setSaving(true);
     try {
       const response = await fetch(`${API_URL}/api/timesheets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          user_id: selectedUser.id,
           month: selectedMonth,
           year: selectedYear,
           rows: newRows.filter(r => r.commessa.trim() !== '')
@@ -199,6 +255,15 @@ export default function TimesheetApp() {
   };
 
   const addEntry = async () => {
+    if (!selectedUser) {
+      if (Platform.OS === 'web') {
+        alert('Seleziona prima un utente');
+      } else {
+        Alert.alert('Errore', 'Seleziona prima un utente');
+      }
+      return;
+    }
+    
     if (!selectedCommessa.trim()) {
       Alert.alert('Errore', 'Seleziona una commessa');
       return;
@@ -340,9 +405,10 @@ export default function TimesheetApp() {
   };
 
   const handlePreviewPDF = async () => {
+    if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
@@ -373,9 +439,10 @@ export default function TimesheetApp() {
   };
 
   const handleDownloadPDF = async () => {
+    if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
@@ -492,7 +559,7 @@ export default function TimesheetApp() {
         </style>
       </head>
       <body>
-        <h1>${appInfo?.employee_name?.toUpperCase() || 'IGOR MARTIGNONI'}  ${appInfo?.matricola || '546'}</h1>
+        <h1>${selectedUser?.name?.toUpperCase() || 'UTENTE'}</h1>
         <h2>${monthName} ${selectedYear}</h2>
         <table>
           <tr>${dayNamesRow}</tr>
@@ -506,10 +573,11 @@ export default function TimesheetApp() {
   };
 
   const handleShareWhatsApp = async () => {
+    if (!selectedUser) return;
     setPdfLoading(true);
     try {
       // Get PDF from backend
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
@@ -529,7 +597,7 @@ export default function TimesheetApp() {
               await navigator.share({
                 files: [file],
                 title: `Timesheet ${ITALIAN_MONTHS[selectedMonth - 1]} ${selectedYear}`,
-                text: `Timesheet ${appInfo?.employee_name} - ${ITALIAN_MONTHS[selectedMonth - 1]} ${selectedYear}`,
+                text: `Timesheet ${selectedUser?.name || 'Utente'} - ${ITALIAN_MONTHS[selectedMonth - 1]} ${selectedYear}`,
               });
             } catch (shareError) {
               // User cancelled or share failed, fallback to download
@@ -578,14 +646,15 @@ export default function TimesheetApp() {
   };
 
   const handleSendEmail = async () => {
+    if (!selectedUser) return;
     setPdfLoading(true);
     try {
       const monthName = ITALIAN_MONTHS[selectedMonth - 1];
-      const subject = `Timesheet ${monthName} ${selectedYear} - ${appInfo?.employee_name}`;
-      const body = `In allegato il timesheet di ${monthName} ${selectedYear}.\n\nTotale ore: ${formatHours(totalHours)}\n\nCordiali saluti,\n${appInfo?.employee_name}`;
+      const subject = `Timesheet ${monthName} ${selectedYear} - ${selectedUser.name}`;
+      const body = `In allegato il timesheet di ${monthName} ${selectedYear}.\n\nTotale ore: ${formatHours(totalHours)}\n\nCordiali saluti,\n${selectedUser.name}`;
       
       // Get PDF from backend
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedYear}/${selectedMonth}/pdf`);
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
       const data = await response.json();
       
       if (data.pdf_base64) {
@@ -775,6 +844,20 @@ export default function TimesheetApp() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* User Selector Bar */}
+      <TouchableOpacity
+        style={styles.userBar}
+        onPress={() => setShowUserPicker(true)}
+      >
+        <View style={styles.userBarLeft}>
+          <Ionicons name="person-circle" size={28} color="#1976D2" />
+          <Text style={styles.userBarText}>
+            {selectedUser ? selectedUser.name : 'Seleziona Utente'}
+          </Text>
+        </View>
+        <Ionicons name="chevron-down" size={20} color="#666" />
+      </TouchableOpacity>
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.dateSelectors}>
@@ -796,10 +879,6 @@ export default function TimesheetApp() {
             </Text>
             <Ionicons name="chevron-down" size={16} color="#666" />
           </TouchableOpacity>
-        </View>
-        <View style={styles.headerRight}>
-          <Text style={styles.employeeName}>{appInfo?.employee_name}</Text>
-          <Text style={styles.matricola}>{appInfo?.matricola}</Text>
         </View>
       </View>
 
@@ -1161,6 +1240,79 @@ export default function TimesheetApp() {
         </View>
       </Modal>
 
+      {/* User Picker Modal */}
+      <Modal visible={showUserPicker} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => {
+              setShowUserPicker(false);
+              setNewUserInput('');
+            }}
+          />
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Seleziona Utente</Text>
+            
+            <View style={styles.newCommessaContainer}>
+              <TextInput
+                style={styles.newCommessaInput}
+                value={newUserInput}
+                onChangeText={setNewUserInput}
+                placeholder="Nuovo utente..."
+                placeholderTextColor="#999"
+              />
+              <TouchableOpacity
+                style={styles.addCommessaButton}
+                onPress={() => {
+                  if (newUserInput.trim()) {
+                    createUser(newUserInput.trim());
+                  }
+                }}
+              >
+                <Ionicons name="add" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.commessaList}>
+              {users.map((user) => (
+                <TouchableOpacity
+                  key={user.id}
+                  style={[
+                    styles.commessaItem,
+                    selectedUser?.id === user.id && styles.commessaItemSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedUser(user);
+                    setShowUserPicker(false);
+                    setNewUserInput('');
+                  }}
+                >
+                  <View style={styles.userItemLeft}>
+                    <Ionicons name="person" size={20} color={selectedUser?.id === user.id ? '#1976D2' : '#666'} />
+                    <Text style={[
+                      styles.commessaItemText,
+                      selectedUser?.id === user.id && styles.commessaItemTextSelected,
+                      { marginLeft: 10 }
+                    ]}>
+                      {user.name}
+                    </Text>
+                  </View>
+                  {selectedUser?.id === user.id && (
+                    <Ionicons name="checkmark" size={20} color="#2196F3" />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {users.length === 0 && (
+                <Text style={styles.noCommesseText}>
+                  Nessun utente registrato. Inserisci un nuovo utente sopra.
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Archive Modal */}
       <Modal visible={showArchive} transparent animationType="fade">
         <TouchableOpacity
@@ -1233,18 +1385,37 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+  },
+  userBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#e3f2fd',
+    borderBottomWidth: 1,
+    borderBottomColor: '#bbdefb',
+  },
+  userBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  userBarText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1976D2',
+    marginLeft: 10,
+  },
+  userItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   monthButton: {
     flexDirection: 'row',
