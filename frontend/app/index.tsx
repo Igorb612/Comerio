@@ -22,6 +22,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as MailComposer from 'expo-mail-composer';
 import * as OfflineDB from '../src/utils/offlineStorage';
+import * as PDFGenerator from '../src/utils/pdfGenerator';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
@@ -37,11 +38,12 @@ interface TimesheetRow {
 
 interface Timesheet {
   id: string;
+  user_id?: string;
   month: number;
   year: number;
-  employee_name: string;
-  matricola: string;
   rows: TimesheetRow[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface Commessa {
@@ -545,26 +547,36 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
-      const data = await response.json();
-      
-      if (data.pdf_base64) {
-        if (Platform.OS === 'web') {
-          const byteCharacters = atob(data.pdf_base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        // Generate PDF client-side
+        const { blob } = PDFGenerator.generateTimesheetPDF(
+          selectedUser.name,
+          selectedMonth,
+          selectedYear,
+          rows
+        );
+        PDFGenerator.previewPDF(blob);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+              orientation: Print.Orientation.landscape,
+            });
           }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
-        } else {
-          // For mobile, use print with orientation
-          await Print.printAsync({
-            uri: `data:application/pdf;base64,${data.pdf_base64}`,
-            orientation: Print.Orientation.landscape,
-          });
         }
       }
     } catch (error) {
@@ -579,38 +591,45 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
-      const data = await response.json();
-      
-      if (data.pdf_base64) {
-        if (Platform.OS === 'web') {
-          // Open PDF in new window and trigger print
-          const byteCharacters = atob(data.pdf_base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        // Generate PDF client-side
+        const { blob } = PDFGenerator.generateTimesheetPDF(
+          selectedUser.name,
+          selectedMonth,
+          selectedYear,
+          rows
+        );
+        PDFGenerator.printPDF(blob);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = URL.createObjectURL(blob);
+            document.body.appendChild(iframe);
+            
+            iframe.onload = () => {
+              setTimeout(() => {
+                iframe.contentWindow?.print();
+              }, 500);
+            };
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+              orientation: Print.Orientation.landscape,
+            });
           }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          const url = URL.createObjectURL(blob);
-          
-          // Create iframe for printing
-          const iframe = document.createElement('iframe');
-          iframe.style.display = 'none';
-          iframe.src = url;
-          document.body.appendChild(iframe);
-          
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-            }, 500);
-          };
-        } else {
-          // For mobile, use print
-          await Print.printAsync({
-            uri: `data:application/pdf;base64,${data.pdf_base64}`,
-            orientation: Print.Orientation.landscape,
-          });
         }
       }
     } catch (error) {
@@ -626,24 +645,35 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
-      const data = await response.json();
-      
-      if (data.pdf_base64) {
-        if (Platform.OS === 'web') {
-          const byteCharacters = atob(data.pdf_base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        // Generate PDF client-side
+        const { blob } = PDFGenerator.generateSummaryPDF(
+          selectedUser.name,
+          summaryMonth,
+          summaryYear,
+          rows
+        );
+        PDFGenerator.previewPDF(blob);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            });
           }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
-        } else {
-          await Print.printAsync({
-            uri: `data:application/pdf;base64,${data.pdf_base64}`,
-          });
         }
       }
     } catch (error) {
@@ -658,34 +688,45 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
-      const data = await response.json();
-      
-      if (data.pdf_base64) {
-        if (Platform.OS === 'web') {
-          const byteCharacters = atob(data.pdf_base64);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        const { blob } = PDFGenerator.generateSummaryPDF(
+          selectedUser.name,
+          summaryMonth,
+          summaryYear,
+          rows
+        );
+        PDFGenerator.printPDF(blob);
+        setShowSummaryModal(false);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = URL.createObjectURL(blob);
+            document.body.appendChild(iframe);
+            
+            iframe.onload = () => {
+              setTimeout(() => {
+                iframe.contentWindow?.print();
+              }, 500);
+            };
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            });
           }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'application/pdf' });
-          const url = URL.createObjectURL(blob);
-          
-          const iframe = document.createElement('iframe');
-          iframe.style.display = 'none';
-          iframe.src = url;
-          document.body.appendChild(iframe);
-          
-          iframe.onload = () => {
-            setTimeout(() => {
-              iframe.contentWindow?.print();
-            }, 500);
-          };
-        } else {
-          await Print.printAsync({
-            uri: `data:application/pdf;base64,${data.pdf_base64}`,
-          });
+          setShowSummaryModal(false);
         }
       }
     } catch (error) {
@@ -693,7 +734,6 @@ export default function TimesheetApp() {
       Alert.alert('Errore', 'Errore durante la stampa del riassunto');
     } finally {
       setPdfLoading(false);
-      setShowSummaryModal(false);
     }
   };
 
@@ -701,37 +741,48 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
-      const data = await response.json();
+      const monthName = ITALIAN_MONTHS[summaryMonth - 1];
       
-      if (data.pdf_base64) {
-        const monthName = ITALIAN_MONTHS[summaryMonth - 1];
-        const byteCharacters = atob(data.pdf_base64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: 'application/pdf' });
-        const file = new File([blob], data.filename, { type: 'application/pdf' });
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        const { blob, filename } = PDFGenerator.generateSummaryPDF(
+          selectedUser.name,
+          summaryMonth,
+          summaryYear,
+          rows
+        );
+        await PDFGenerator.sharePDF(blob, filename, `Riepilogo ${monthName} ${summaryYear}`);
+        setShowSummaryModal(false);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+        const data = await response.json();
         
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: `Riepilogo ${monthName} ${summaryYear}`,
-              text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
-            });
-            setShowSummaryModal(false);
-          } catch (shareError: any) {
-            if (shareError.name !== 'AbortError') {
-              console.error('Share error:', shareError);
-            }
+        if (data.pdf_base64) {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
           }
-        } else {
-          // Fallback: open WhatsApp web
-          const text = encodeURIComponent(`Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`);
-          window.open(`https://wa.me/?text=${text}`, '_blank');
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const file = new File([blob], data.filename, { type: 'application/pdf' });
+          
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: `Riepilogo ${monthName} ${summaryYear}`,
+                text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
+              });
+              setShowSummaryModal(false);
+            } catch (shareError: any) {
+              if (shareError.name !== 'AbortError') {
+                console.error('Share error:', shareError);
+              }
+            }
+          } else {
+            const text = encodeURIComponent(`Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`);
+            window.open(`https://wa.me/?text=${text}`, '_blank');
+          }
         }
       }
     } catch (error) {
@@ -745,38 +796,49 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
-      const data = await response.json();
+      const monthName = ITALIAN_MONTHS[summaryMonth - 1];
       
-      if (data.pdf_base64) {
-        const monthName = ITALIAN_MONTHS[summaryMonth - 1];
-        const byteCharacters = atob(data.pdf_base64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: 'application/pdf' });
-        const file = new File([blob], data.filename, { type: 'application/pdf' });
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        const { blob, filename } = PDFGenerator.generateSummaryPDF(
+          selectedUser.name,
+          summaryMonth,
+          summaryYear,
+          rows
+        );
+        await PDFGenerator.sharePDF(blob, filename, `Riepilogo ${monthName} ${summaryYear}`);
+        setShowSummaryModal(false);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+        const data = await response.json();
         
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: `Riepilogo ${monthName} ${summaryYear}`,
-              text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
-            });
-            setShowSummaryModal(false);
-          } catch (shareError: any) {
-            if (shareError.name !== 'AbortError') {
-              console.error('Share error:', shareError);
-            }
+        if (data.pdf_base64) {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
           }
-        } else {
-          // Fallback: mailto link
-          const subject = encodeURIComponent(`Riepilogo ore ${monthName} ${summaryYear} - ${selectedUser.name}`);
-          const body = encodeURIComponent(`In allegato il riepilogo ore di ${monthName} ${summaryYear}.\n\nCordiali saluti,\n${selectedUser.name}`);
-          window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const file = new File([blob], data.filename, { type: 'application/pdf' });
+          
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: `Riepilogo ${monthName} ${summaryYear}`,
+                text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
+              });
+              setShowSummaryModal(false);
+            } catch (shareError: any) {
+              if (shareError.name !== 'AbortError') {
+                console.error('Share error:', shareError);
+              }
+            }
+          } else {
+            const subject = encodeURIComponent(`Riepilogo ore ${monthName} ${summaryYear} - ${selectedUser.name}`);
+            const body = encodeURIComponent(`In allegato il riepilogo ore di ${monthName} ${summaryYear}.\n\nCordiali saluti,\n${selectedUser.name}`);
+            window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+          }
         }
       }
     } catch (error) {
