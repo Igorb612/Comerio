@@ -20,10 +20,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
-import * as MailComposer from 'expo-mail-composer';
+import * as LocalDB from '../src/utils/localDatabase';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
+
+// For native app: use local SQLite database (offline)
+// For web: use backend API
+const USE_LOCAL_DB = Platform.OS !== 'web';
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 // Types
 interface TimesheetRow {
@@ -138,9 +142,20 @@ export default function TimesheetApp() {
 
   // Fetch data on mount
   useEffect(() => {
-    fetchAppInfo();
-    fetchCommesse();
-    fetchUsers();
+    const initApp = async () => {
+      if (USE_LOCAL_DB) {
+        try {
+          await LocalDB.initDatabase();
+          console.log('SQLite database initialized');
+        } catch (err) {
+          console.error('Failed to initialize database:', err);
+        }
+      }
+      fetchAppInfo();
+      fetchCommesse();
+      fetchUsers();
+    };
+    initApp();
   }, []);
 
   // Fetch timesheet when month, year, or user changes
@@ -163,11 +178,19 @@ export default function TimesheetApp() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/users`);
-      const data = await response.json();
-      setUsers(data);
-      if (data.length > 0 && !selectedUser) {
-        setSelectedUser(data[0]);
+      if (USE_LOCAL_DB) {
+        const data = await LocalDB.getUsers();
+        setUsers(data);
+        if (data.length > 0 && !selectedUser) {
+          setSelectedUser(data[0]);
+        }
+      } else {
+        const response = await fetch(`${API_URL}/api/users`);
+        const data = await response.json();
+        setUsers(data);
+        if (data.length > 0 && !selectedUser) {
+          setSelectedUser(data[0]);
+        }
       }
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -176,20 +199,29 @@ export default function TimesheetApp() {
 
   const createUser = async (name: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      if (response.ok) {
-        const newUser = await response.json();
+      if (USE_LOCAL_DB) {
+        const newUser = await LocalDB.createUser(name);
         setUsers([...users, newUser]);
         setSelectedUser(newUser);
         setNewUserInput('');
         setShowUserPicker(false);
         return true;
+      } else {
+        const response = await fetch(`${API_URL}/api/users`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        if (response.ok) {
+          const newUser = await response.json();
+          setUsers([...users, newUser]);
+          setSelectedUser(newUser);
+          setNewUserInput('');
+          setShowUserPicker(false);
+          return true;
+        }
+        return false;
       }
-      return false;
     } catch (error) {
       console.error('Error creating user:', error);
       return false;
@@ -197,56 +229,47 @@ export default function TimesheetApp() {
   };
 
   const deleteUser = async (user: User) => {
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(`Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`);
-      if (confirmed) {
-        try {
-          await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
-          const updatedUsers = users.filter(u => u.id !== user.id);
-          setUsers(updatedUsers);
-          if (selectedUser?.id === user.id) {
-            setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
-          }
-          alert('Utente e tutti i dati relativi eliminati');
-        } catch (error) {
-          console.error('Error deleting user:', error);
-          alert('Errore durante l\'eliminazione');
-        }
-      }
-    } else {
-      Alert.alert(
-        'Elimina Utente',
-        `Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`,
-        [
-          { text: 'Annulla', style: 'cancel' },
-          {
-            text: 'Elimina',
-            style: 'destructive',
-            onPress: async () => {
-              try {
+    Alert.alert(
+      'Elimina Utente',
+      `Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`,
+      [
+        { text: 'Annulla', style: 'cancel' },
+        {
+          text: 'Elimina',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (USE_LOCAL_DB) {
+                await LocalDB.deleteUser(user.id);
+              } else {
                 await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
-                const updatedUsers = users.filter(u => u.id !== user.id);
-                setUsers(updatedUsers);
-                if (selectedUser?.id === user.id) {
-                  setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
-                }
-                Alert.alert('Eliminato', 'Utente e tutti i dati relativi eliminati');
-              } catch (error) {
-                console.error('Error deleting user:', error);
-                Alert.alert('Errore', 'Errore durante l\'eliminazione');
               }
+              const updatedUsers = users.filter(u => u.id !== user.id);
+              setUsers(updatedUsers);
+              if (selectedUser?.id === user.id) {
+                setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
+              }
+              Alert.alert('Eliminato', 'Utente e tutti i dati relativi eliminati');
+            } catch (error) {
+              console.error('Error deleting user:', error);
+              Alert.alert('Errore', 'Errore durante l\'eliminazione');
             }
           }
-        ]
-      );
-    }
+        }
+      ]
+    );
   };
 
   const fetchCommesse = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/commesse`);
-      const data = await response.json();
-      setCommesse(data);
+      if (USE_LOCAL_DB) {
+        const data = await LocalDB.getCommesse();
+        setCommesse(data);
+      } else {
+        const response = await fetch(`${API_URL}/api/commesse`);
+        const data = await response.json();
+        setCommesse(data);
+      }
     } catch (error) {
       console.error('Error fetching commesse:', error);
     }
@@ -260,16 +283,25 @@ export default function TimesheetApp() {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}`);
-      if (response.ok) {
-        const data = await response.json();
+      if (USE_LOCAL_DB) {
+        const data = await LocalDB.getTimesheet(selectedUser.id, selectedYear, selectedMonth);
         if (data) {
           setRows(data.rows || []);
         } else {
           setRows([]);
         }
       } else {
-        setRows([]);
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data) {
+            setRows(data.rows || []);
+          } else {
+            setRows([]);
+          }
+        } else {
+          setRows([]);
+        }
       }
     } catch (error) {
       console.error('Error fetching timesheet:', error);
@@ -282,9 +314,14 @@ export default function TimesheetApp() {
   const fetchArchivedTimesheets = async () => {
     if (!selectedUser) return;
     try {
-      const response = await fetch(`${API_URL}/api/timesheets?user_id=${selectedUser.id}&year=${selectedYear}`);
-      const data = await response.json();
-      setArchivedTimesheets(data);
+      if (USE_LOCAL_DB) {
+        const data = await LocalDB.getTimesheets(selectedUser.id, selectedYear);
+        setArchivedTimesheets(data);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets?user_id=${selectedUser.id}&year=${selectedYear}`);
+        const data = await response.json();
+        setArchivedTimesheets(data);
+      }
     } catch (error) {
       console.error('Error fetching archived timesheets:', error);
     }
@@ -294,21 +331,32 @@ export default function TimesheetApp() {
     if (!selectedUser) return false;
     setSaving(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: selectedUser.id,
-          month: selectedMonth,
-          year: selectedYear,
-          rows: newRows.filter(r => r.commessa.trim() !== '')
-        })
-      });
-      if (response.ok) {
+      if (USE_LOCAL_DB) {
+        await LocalDB.saveTimesheet(
+          selectedUser.id,
+          selectedYear,
+          selectedMonth,
+          newRows.filter(r => r.commessa.trim() !== '')
+        );
         await fetchCommesse();
         return true;
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: selectedUser.id,
+            month: selectedMonth,
+            year: selectedYear,
+            rows: newRows.filter(r => r.commessa.trim() !== '')
+          })
+        });
+        if (response.ok) {
+          await fetchCommesse();
+          return true;
+        }
+        return false;
       }
-      return false;
     } catch (error) {
       console.error('Error saving timesheet:', error);
       return false;
