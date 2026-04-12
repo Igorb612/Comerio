@@ -644,8 +644,10 @@ export default function TimesheetApp() {
           const blob = new Blob([byteArray], { type: 'application/pdf' });
           const file = new File([blob], data.filename, { type: 'application/pdf' });
           
-          // Use Web Share API (works on mobile browsers - includes Email, Bluetooth, etc.)
-          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          // Check if Web Share API with files is supported
+          const canShareFiles = navigator.share && navigator.canShare && navigator.canShare({ files: [file] });
+          
+          if (canShareFiles) {
             try {
               await navigator.share({
                 files: [file],
@@ -654,19 +656,33 @@ export default function TimesheetApp() {
               });
               setShowSummaryModal(false);
             } catch (shareError: any) {
-              if (shareError.name !== 'AbortError') {
-                console.error('Share error:', shareError);
-                alert('Errore durante la condivisione');
+              if (shareError.name === 'AbortError') {
+                // User cancelled, do nothing
+              } else {
+                // Share failed, fallback to download
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = data.filename;
+                link.click();
+                URL.revokeObjectURL(url);
+                if (Platform.OS === 'web') {
+                  alert('PDF scaricato! Puoi inviarlo via Email o Bluetooth dalla cartella Download.');
+                }
+                setShowSummaryModal(false);
               }
             }
           } else {
-            // Fallback: download the file
+            // Web Share API not supported - download file
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
             link.download = data.filename;
             link.click();
-            alert('File scaricato. Puoi condividerlo manualmente via Email o Bluetooth.');
+            URL.revokeObjectURL(url);
+            if (Platform.OS === 'web') {
+              alert('PDF scaricato! Puoi inviarlo via Email o Bluetooth dalla cartella Download.');
+            }
             setShowSummaryModal(false);
           }
         } else {
@@ -688,7 +704,12 @@ export default function TimesheetApp() {
       }
     } catch (error) {
       console.error('Error sharing summary:', error);
-      Alert.alert('Errore', 'Errore durante la condivisione del riassunto');
+      // Fallback: try to at least inform the user
+      if (Platform.OS === 'web') {
+        alert('Impossibile condividere. Prova a scaricare il PDF con Anteprima.');
+      } else {
+        Alert.alert('Errore', 'Errore durante la condivisione. Prova con Anteprima.');
+      }
     } finally {
       setPdfLoading(false);
     }
