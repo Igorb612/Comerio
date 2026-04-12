@@ -21,7 +21,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as MailComposer from 'expo-mail-composer';
-import * as OfflineDB from './offlineStorage';
+import * as OfflineDB from '../src/utils/offlineStorage';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
@@ -123,6 +123,21 @@ export default function TimesheetApp() {
   const availableYears = Array.from({ length: 11 }, (_, i) => currentRealYear - 5 + i);
 
   const numDays = getDaysInMonth(selectedMonth, selectedYear);
+
+  // Register Service Worker for PWA
+  useEffect(() => {
+    if (Platform.OS === 'web' && 'serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then((registration) => {
+            console.log('[App] Service Worker registered:', registration.scope);
+          })
+          .catch((error) => {
+            console.error('[App] Service Worker registration failed:', error);
+          });
+      });
+    }
+  }, []);
 
   // Initialize offline DB and fetch data on mount
   useEffect(() => {
