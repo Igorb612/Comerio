@@ -540,22 +540,41 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      // Generate PDF locally using expo-print
-      const html = generatePdfHtml();
-      
-      const { uri } = await Print.printToFileAsync({
-        html: html,
-        width: 842, // A4 landscape width in points
-        height: 595, // A4 landscape height in points
-      });
-      
-      // Use expo-print to preview (opens print dialog which shows preview)
-      await Print.printAsync({
-        uri: uri,
-      });
+      if (USE_LOCAL_DB) {
+        // Offline: generate locally
+        const html = generatePdfHtml();
+        const { uri } = await Print.printToFileAsync({ html, width: 842, height: 595 });
+        await Print.printAsync({ uri });
+      } else {
+        // Online: use backend API
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            });
+          }
+        }
+      }
     } catch (error) {
       console.error('Error generating PDF:', error);
-      Alert.alert('Errore', 'Errore durante la generazione del PDF');
+      if (Platform.OS === 'web') {
+        alert('Errore durante la generazione del PDF');
+      } else {
+        Alert.alert('Errore', 'Errore durante la generazione del PDF');
+      }
     } finally {
       setPdfLoading(false);
     }
@@ -565,68 +584,143 @@ export default function TimesheetApp() {
     if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      // Generate PDF locally using expo-print
-      const html = generatePdfHtml();
-      
-      const { uri } = await Print.printToFileAsync({
-        html: html,
-        width: 842,
-        height: 595,
-      });
-      
-      // Print directly
-      await Print.printAsync({
-        uri: uri,
-      });
+      if (USE_LOCAL_DB) {
+        // Offline: generate locally
+        const html = generatePdfHtml();
+        const { uri } = await Print.printToFileAsync({ html, width: 842, height: 595 });
+        await Print.printAsync({ uri });
+      } else {
+        // Online: use backend API
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = URL.createObjectURL(blob);
+            document.body.appendChild(iframe);
+            iframe.onload = () => {
+              setTimeout(() => { iframe.contentWindow?.print(); }, 500);
+            };
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            });
+          }
+        }
+      }
     } catch (error) {
       console.error('Error printing PDF:', error);
-      Alert.alert('Errore', 'Errore durante la stampa');
+      if (Platform.OS === 'web') {
+        alert('Errore durante la stampa');
+      } else {
+        Alert.alert('Errore', 'Errore durante la stampa');
+      }
     } finally {
       setPdfLoading(false);
     }
   };
 
-  // Summary report functions - OFFLINE using expo-print
+  // Summary report functions - uses backend API for web, local for native
   const handlePreviewSummary = async () => {
+    if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const html = await generateSummaryHtml(summaryYear, summaryMonth);
-      
-      const { uri } = await Print.printToFileAsync({
-        html: html,
-        width: 595, // A4 portrait
-        height: 842,
-      });
-      
-      await Print.printAsync({
-        uri: uri,
-      });
+      if (USE_LOCAL_DB) {
+        // Offline: generate locally
+        const html = await generateSummaryHtml(summaryYear, summaryMonth);
+        const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+        await Print.printAsync({ uri });
+      } else {
+        // Online: use backend API
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            });
+          }
+        }
+      }
     } catch (error) {
       console.error('Error generating summary:', error);
-      Alert.alert('Errore', 'Errore durante la generazione del riepilogo');
+      if (Platform.OS === 'web') {
+        alert('Errore durante la generazione del riepilogo');
+      } else {
+        Alert.alert('Errore', 'Errore durante la generazione del riepilogo');
+      }
     } finally {
       setPdfLoading(false);
     }
   };
 
   const handlePrintSummary = async () => {
+    if (!selectedUser) return;
     setPdfLoading(true);
     try {
-      const html = await generateSummaryHtml(summaryYear, summaryMonth);
-      
-      const { uri } = await Print.printToFileAsync({
-        html: html,
-        width: 595,
-        height: 842,
-      });
-      
-      await Print.printAsync({
-        uri: uri,
-      });
+      if (USE_LOCAL_DB) {
+        // Offline: generate locally
+        const html = await generateSummaryHtml(summaryYear, summaryMonth);
+        const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+        await Print.printAsync({ uri });
+      } else {
+        // Online: use backend API
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          if (Platform.OS === 'web') {
+            const byteCharacters = atob(data.pdf_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = URL.createObjectURL(blob);
+            document.body.appendChild(iframe);
+            iframe.onload = () => {
+              setTimeout(() => { iframe.contentWindow?.print(); }, 500);
+            };
+          } else {
+            await Print.printAsync({
+              uri: `data:application/pdf;base64,${data.pdf_base64}`,
+            });
+          }
+        }
+      }
       setShowSummaryModal(false);
     } catch (error) {
       console.error('Error printing summary:', error);
-      Alert.alert('Errore', 'Errore durante la stampa');
+      if (Platform.OS === 'web') {
+        alert('Errore durante la stampa');
+      } else {
+        Alert.alert('Errore', 'Errore durante la stampa');
+      }
     } finally {
       setPdfLoading(false);
     }
