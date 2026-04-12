@@ -25,9 +25,10 @@ import * as LocalDB from '../src/utils/localDatabase';
 
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
 
-// OFFLINE MODE: Always use local SQLite database
-// This app is designed to work 100% offline on Android tablet
-const USE_LOCAL_DB = true;
+// ONLINE MODE (web) uses backend API
+// OFFLINE MODE (native app) uses local SQLite database
+const USE_LOCAL_DB = Platform.OS !== 'web';
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // Types
 interface TimesheetRow {
@@ -201,7 +202,7 @@ export default function TimesheetApp() {
     try {
       if (USE_LOCAL_DB) {
         const newUser = await LocalDB.createUser(name);
-        setUsers([...users, newUser]);
+        await fetchUsers(); // Refresh list
         setSelectedUser(newUser);
         setNewUserInput('');
         setShowUserPicker(false);
@@ -214,7 +215,7 @@ export default function TimesheetApp() {
         });
         if (response.ok) {
           const newUser = await response.json();
-          setUsers([...users, newUser]);
+          await fetchUsers(); // Refresh list from server
           setSelectedUser(newUser);
           setNewUserInput('');
           setShowUserPicker(false);
@@ -229,35 +230,55 @@ export default function TimesheetApp() {
   };
 
   const deleteUser = async (user: User) => {
-    Alert.alert(
-      'Elimina Utente',
-      `Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`,
-      [
-        { text: 'Annulla', style: 'cancel' },
-        {
-          text: 'Elimina',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (USE_LOCAL_DB) {
-                await LocalDB.deleteUser(user.id);
-              } else {
-                await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`);
+      if (confirmed) {
+        try {
+          if (USE_LOCAL_DB) {
+            await LocalDB.deleteUser(user.id);
+          } else {
+            await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
+          }
+          await fetchUsers(); // Refresh list
+          if (selectedUser?.id === user.id) {
+            setSelectedUser(null);
+          }
+          alert('Utente eliminato');
+        } catch (error) {
+          console.error('Error deleting user:', error);
+          alert('Errore durante l\'eliminazione');
+        }
+      }
+    } else {
+      Alert.alert(
+        'Elimina Utente',
+        `Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`,
+        [
+          { text: 'Annulla', style: 'cancel' },
+          {
+            text: 'Elimina',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                if (USE_LOCAL_DB) {
+                  await LocalDB.deleteUser(user.id);
+                } else {
+                  await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
+                }
+                await fetchUsers(); // Refresh list
+                if (selectedUser?.id === user.id) {
+                  setSelectedUser(null);
+                }
+                Alert.alert('Eliminato', 'Utente eliminato');
+              } catch (error) {
+                console.error('Error deleting user:', error);
+                Alert.alert('Errore', 'Errore durante l\'eliminazione');
               }
-              const updatedUsers = users.filter(u => u.id !== user.id);
-              setUsers(updatedUsers);
-              if (selectedUser?.id === user.id) {
-                setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
-              }
-              Alert.alert('Eliminato', 'Utente e tutti i dati relativi eliminati');
-            } catch (error) {
-              console.error('Error deleting user:', error);
-              Alert.alert('Errore', 'Errore durante l\'eliminazione');
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const fetchCommesse = async () => {
@@ -941,6 +962,78 @@ export default function TimesheetApp() {
     }
   };
 
+  // Send timesheet via Email (web version)
+  const handleSendEmail = async () => {
+    if (!selectedUser) return;
+    setPdfLoading(true);
+    try {
+      const monthName = ITALIAN_MONTHS[selectedMonth - 1];
+      const subject = encodeURIComponent(`Timesheet ${monthName} ${selectedYear} - ${selectedUser.name}`);
+      const body = encodeURIComponent(`In allegato il timesheet di ${monthName} ${selectedYear}.\n\nTotale ore: ${formatHours(totalHours)}\n\nCordiali saluti,\n${selectedUser.name}`);
+      
+      if (Platform.OS === 'web') {
+        // For web: download PDF and open mailto
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}/pdf`);
+        const data = await response.json();
+        
+        if (data.pdf_base64) {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const file = new File([blob], data.filename, { type: 'application/pdf' });
+          
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: `Timesheet ${monthName} ${selectedYear}`,
+                text: `Timesheet ${selectedUser.name} - ${monthName} ${selectedYear}`,
+              });
+            } catch (shareError: any) {
+              if (shareError.name !== 'AbortError') {
+                // Fallback: download
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = data.filename;
+                link.click();
+                window.location.href = `mailto:?subject=${subject}&body=${body}`;
+              }
+            }
+          } else {
+            // Download and open mailto
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = data.filename;
+            link.click();
+            setTimeout(() => {
+              window.location.href = `mailto:?subject=${subject}&body=${body}`;
+            }, 500);
+          }
+        }
+      } else {
+        // Native: use sharing
+        const html = generatePdfHtml();
+        const { uri } = await Print.printToFileAsync({ html, width: 842, height: 595 });
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Invia via Email' });
+      }
+    } catch (error) {
+      console.error('Error sending email:', error);
+      if (Platform.OS === 'web') {
+        alert('Errore durante l\'invio');
+      } else {
+        Alert.alert('Errore', 'Errore durante l\'invio');
+      }
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   // ========== BACKUP FUNCTIONS ==========
   const handleSaveBackup = async () => {
     setPdfLoading(true);
@@ -1281,15 +1374,31 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Riassunto</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.bottomButton} onPress={handleSaveBackup} disabled={pdfLoading}>
-          <Ionicons name="cloud-upload" size={20} color="#4CAF50" />
-          <Text style={styles.bottomButtonText}>Salva Backup</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.bottomButton} onPress={handleLoadBackup} disabled={pdfLoading}>
-          <Ionicons name="cloud-download" size={20} color="#FF9800" />
-          <Text style={styles.bottomButtonText}>Carica Backup</Text>
-        </TouchableOpacity>
+        {USE_LOCAL_DB ? (
+          <>
+            <TouchableOpacity style={styles.bottomButton} onPress={handleSaveBackup} disabled={pdfLoading}>
+              <Ionicons name="cloud-upload" size={20} color="#4CAF50" />
+              <Text style={styles.bottomButtonText}>Salva Backup</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.bottomButton} onPress={handleLoadBackup} disabled={pdfLoading}>
+              <Ionicons name="cloud-download" size={20} color="#FF9800" />
+              <Text style={styles.bottomButtonText}>Carica Backup</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity style={styles.bottomButton} onPress={handleShareWhatsApp} disabled={pdfLoading}>
+              <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+              <Text style={styles.bottomButtonText}>WhatsApp</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.bottomButton} onPress={handleSendEmail} disabled={pdfLoading}>
+              <Ionicons name="mail" size={20} color="#EA4335" />
+              <Text style={styles.bottomButtonText}>Email</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
       {/* Month Picker Modal */}
