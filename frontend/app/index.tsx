@@ -20,8 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import * as DocumentPicker from 'expo-document-picker';
 import * as LocalDB from '../src/utils/localDatabase';
-import * as MailComposer from 'expo-mail-composer';
 
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
 
@@ -941,46 +941,68 @@ export default function TimesheetApp() {
     }
   };
 
-  // Send timesheet via Email - OFFLINE
-  const handleSendEmail = async () => {
-    if (!selectedUser) return;
+  // ========== BACKUP FUNCTIONS ==========
+  const handleSaveBackup = async () => {
     setPdfLoading(true);
     try {
-      const monthName = ITALIAN_MONTHS[selectedMonth - 1];
-      const subject = `Timesheet ${monthName} ${selectedYear} - ${selectedUser.name}`;
-      const body = `In allegato il timesheet di ${monthName} ${selectedYear}.\n\nTotale ore: ${formatHours(totalHours)}\n\nCordiali saluti,\n${selectedUser.name}`;
+      const backupData = await LocalDB.exportAllData();
+      const date = new Date().toISOString().split('T')[0];
+      const filename = `backup_timesheet_${date}.json`;
+      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
       
-      const html = generatePdfHtml();
-      
-      const { uri } = await Print.printToFileAsync({
-        html: html,
-        width: 842,
-        height: 595,
+      await FileSystem.writeAsStringAsync(fileUri, backupData, {
+        encoding: FileSystem.EncodingType.UTF8,
       });
       
-      // Try MailComposer first
-      const isMailAvailable = await MailComposer.isAvailableAsync();
-      
-      if (isMailAvailable) {
-        await MailComposer.composeAsync({
-          subject: subject,
-          body: body,
-          attachments: [uri],
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/json',
+          dialogTitle: 'Salva Backup Timesheet',
         });
+        Alert.alert('Backup Salvato', 'Il backup è stato esportato. Salvalo in un posto sicuro!');
       } else {
-        // Fallback to sharing
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, {
-            mimeType: 'application/pdf',
-            dialogTitle: 'Invia Timesheet via Email',
-          });
-        } else {
-          Alert.alert('Info', 'Email non disponibile. Usa la condivisione.');
-        }
+        Alert.alert('Errore', 'La condivisione non è disponibile');
       }
     } catch (error) {
-      console.error('Error sending email:', error);
-      Alert.alert('Errore', 'Errore durante l\'invio');
+      console.error('Error saving backup:', error);
+      Alert.alert('Errore', 'Errore durante il salvataggio del backup');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleLoadBackup = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true,
+      });
+      
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        return;
+      }
+      
+      const file = result.assets[0];
+      setPdfLoading(true);
+      
+      const content = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      
+      const imported = await LocalDB.importAllData(content);
+      
+      // Refresh data
+      await fetchUsers();
+      await fetchCommesse();
+      await fetchTimesheet();
+      
+      Alert.alert(
+        'Backup Caricato',
+        `Importati:\n- ${imported.users} utenti\n- ${imported.commesse} commesse\n- ${imported.timesheets} fogli ore`
+      );
+    } catch (error) {
+      console.error('Error loading backup:', error);
+      Alert.alert('Errore', 'Errore durante il caricamento del backup. Verifica che il file sia valido.');
     } finally {
       setPdfLoading(false);
     }
@@ -1259,14 +1281,14 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Riassunto</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.bottomButton} onPress={handleShareWhatsApp} disabled={pdfLoading}>
-          <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
-          <Text style={styles.bottomButtonText}>WhatsApp</Text>
+        <TouchableOpacity style={styles.bottomButton} onPress={handleSaveBackup} disabled={pdfLoading}>
+          <Ionicons name="cloud-upload" size={20} color="#4CAF50" />
+          <Text style={styles.bottomButtonText}>Salva Backup</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.bottomButton} onPress={handleSendEmail} disabled={pdfLoading}>
-          <Ionicons name="mail" size={20} color="#EA4335" />
-          <Text style={styles.bottomButtonText}>Email</Text>
+        <TouchableOpacity style={styles.bottomButton} onPress={handleLoadBackup} disabled={pdfLoading}>
+          <Ionicons name="cloud-download" size={20} color="#FF9800" />
+          <Text style={styles.bottomButtonText}>Carica Backup</Text>
         </TouchableOpacity>
       </View>
 
@@ -1668,28 +1690,6 @@ export default function TimesheetApp() {
               >
                 <Ionicons name="print" size={18} color="#fff" />
                 <Text style={styles.summaryButtonText}>Stampa</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.summaryButtonsRow}>
-              <TouchableOpacity
-                style={styles.summaryWhatsAppButton}
-                onPress={() => {
-                  handleShareSummaryWhatsApp();
-                }}
-              >
-                <Ionicons name="logo-whatsapp" size={18} color="#fff" />
-                <Text style={styles.summaryButtonText}>WhatsApp</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={styles.summaryEmailButton}
-                onPress={() => {
-                  handleShareSummaryEmail();
-                }}
-              >
-                <Ionicons name="mail" size={18} color="#fff" />
-                <Text style={styles.summaryButtonText}>Email</Text>
               </TouchableOpacity>
             </View>
           </View>

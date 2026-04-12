@@ -1,9 +1,6 @@
-// Local database for offline storage
-// Uses SQLite on native devices (Android/iOS)
-// Uses AsyncStorage as fallback
+// Local database for offline storage - SQLite only
 import { Platform } from 'react-native';
 import * as SQLite from 'expo-sqlite';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Types
 export interface User {
@@ -42,51 +39,28 @@ const generateUUID = (): string => {
   });
 };
 
-// Storage keys for AsyncStorage fallback
-const STORAGE_KEYS = {
-  USERS: 'timesheet_users',
-  COMMESSE: 'timesheet_commesse',
-  TIMESHEETS: 'timesheet_data'
-};
-
 // Database instance
 let db: SQLite.SQLiteDatabase | null = null;
-let useAsyncStorage = Platform.OS === 'web';
 
-// ========== ASYNC STORAGE HELPERS (for web fallback) ==========
-const getAsyncData = async <T>(key: string, defaultValue: T): Promise<T> => {
-  try {
-    const data = await AsyncStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
-  } catch (e) {
-    console.log('[AsyncStorage] Error reading:', e);
-    return defaultValue;
-  }
-};
+// In-memory fallback for web
+let memoryDB: {
+  users: User[];
+  commesse: Commessa[];
+  timesheets: Timesheet[];
+} = { users: [], commesse: [], timesheets: [] };
 
-const setAsyncData = async <T>(key: string, value: T): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.log('[AsyncStorage] Error writing:', e);
-  }
-};
+const isWeb = Platform.OS === 'web';
 
 // ========== DATABASE INITIALIZATION ==========
 export const initDatabase = async (): Promise<void> => {
-  // For web, use AsyncStorage
-  if (Platform.OS === 'web') {
-    useAsyncStorage = true;
-    console.log('[DB] Using AsyncStorage for web');
+  if (isWeb) {
+    console.log('[DB] Web mode - using memory storage');
     return;
   }
   
-  // For native (Android/iOS), use SQLite
   try {
     db = await SQLite.openDatabaseAsync('timesheet.db');
-    useAsyncStorage = false;
     
-    // Create tables with WAL mode for better performance
     await db.execAsync(`
       PRAGMA journal_mode = WAL;
       
@@ -114,182 +88,107 @@ export const initDatabase = async (): Promise<void> => {
       );
     `);
     
-    console.log('[DB] SQLite database initialized successfully');
+    console.log('[DB] SQLite initialized');
   } catch (error) {
-    console.error('[DB] SQLite initialization failed, using AsyncStorage:', error);
-    useAsyncStorage = true;
+    console.error('[DB] Init error:', error);
   }
 };
 
 // ============ USERS ============
-
 export const getUsers = async (): Promise<User[]> => {
-  if (useAsyncStorage || !db) {
-    const users = await getAsyncData<User[]>(STORAGE_KEYS.USERS, []);
-    return users.sort((a, b) => a.name.localeCompare(b.name));
-  }
+  if (isWeb || !db) return memoryDB.users.sort((a, b) => a.name.localeCompare(b.name));
   
   try {
-    const result = await db.getAllAsync<User>('SELECT * FROM users ORDER BY name');
-    return result;
-  } catch (error) {
-    console.error('[DB] Error getting users:', error);
+    return await db.getAllAsync<User>('SELECT * FROM users ORDER BY name');
+  } catch (e) {
+    console.error('[DB] getUsers error:', e);
     return [];
   }
 };
 
 export const createUser = async (name: string): Promise<User> => {
-  const id = generateUUID();
-  const user: User = { id, name, created_at: new Date().toISOString() };
+  const user: User = { id: generateUUID(), name, created_at: new Date().toISOString() };
   
-  if (useAsyncStorage || !db) {
-    const users = await getAsyncData<User[]>(STORAGE_KEYS.USERS, []);
-    users.push(user);
-    await setAsyncData(STORAGE_KEYS.USERS, users);
+  if (isWeb || !db) {
+    memoryDB.users.push(user);
     return user;
   }
   
-  try {
-    await db.runAsync(
-      'INSERT INTO users (id, name) VALUES (?, ?)',
-      [id, name]
-    );
-    return { id, name };
-  } catch (error) {
-    console.error('[DB] Error creating user:', error);
-    throw error;
-  }
+  await db.runAsync('INSERT INTO users (id, name) VALUES (?, ?)', [user.id, name]);
+  return user;
 };
 
 export const deleteUser = async (userId: string): Promise<void> => {
-  if (useAsyncStorage || !db) {
-    const users = await getAsyncData<User[]>(STORAGE_KEYS.USERS, []);
-    await setAsyncData(STORAGE_KEYS.USERS, users.filter(u => u.id !== userId));
-    
-    const timesheets = await getAsyncData<Timesheet[]>(STORAGE_KEYS.TIMESHEETS, []);
-    await setAsyncData(STORAGE_KEYS.TIMESHEETS, timesheets.filter(t => t.user_id !== userId));
+  if (isWeb || !db) {
+    memoryDB.users = memoryDB.users.filter(u => u.id !== userId);
+    memoryDB.timesheets = memoryDB.timesheets.filter(t => t.user_id !== userId);
     return;
   }
   
-  try {
-    await db.runAsync('DELETE FROM users WHERE id = ?', [userId]);
-    await db.runAsync('DELETE FROM timesheets WHERE user_id = ?', [userId]);
-  } catch (error) {
-    console.error('[DB] Error deleting user:', error);
-  }
+  await db.runAsync('DELETE FROM users WHERE id = ?', [userId]);
+  await db.runAsync('DELETE FROM timesheets WHERE user_id = ?', [userId]);
 };
 
 // ============ COMMESSE ============
-
 export const getCommesse = async (): Promise<Commessa[]> => {
-  if (useAsyncStorage || !db) {
-    const commesse = await getAsyncData<Commessa[]>(STORAGE_KEYS.COMMESSE, []);
-    return commesse.sort((a, b) => a.name.localeCompare(b.name));
-  }
+  if (isWeb || !db) return memoryDB.commesse.sort((a, b) => a.name.localeCompare(b.name));
   
   try {
-    const result = await db.getAllAsync<Commessa>('SELECT * FROM commesse ORDER BY name');
-    return result;
-  } catch (error) {
-    console.error('[DB] Error getting commesse:', error);
+    return await db.getAllAsync<Commessa>('SELECT * FROM commesse ORDER BY name');
+  } catch (e) {
+    console.error('[DB] getCommesse error:', e);
     return [];
   }
 };
 
 export const saveCommessa = async (name: string): Promise<Commessa> => {
-  if (useAsyncStorage || !db) {
-    const commesse = await getAsyncData<Commessa[]>(STORAGE_KEYS.COMMESSE, []);
-    const existing = commesse.find(c => c.name === name);
+  if (isWeb || !db) {
+    const existing = memoryDB.commesse.find(c => c.name === name);
     if (existing) return existing;
-    
-    const commessa: Commessa = { 
-      id: generateUUID(), 
-      name, 
-      created_at: new Date().toISOString() 
-    };
-    commesse.push(commessa);
-    await setAsyncData(STORAGE_KEYS.COMMESSE, commesse);
+    const commessa: Commessa = { id: generateUUID(), name, created_at: new Date().toISOString() };
+    memoryDB.commesse.push(commessa);
     return commessa;
   }
   
-  try {
-    // Check if exists
-    const existing = await db.getFirstAsync<Commessa>(
-      'SELECT * FROM commesse WHERE name = ?',
-      [name]
-    );
-    
-    if (existing) return existing;
-    
-    const id = generateUUID();
-    await db.runAsync(
-      'INSERT INTO commesse (id, name) VALUES (?, ?)',
-      [id, name]
-    );
-    return { id, name };
-  } catch (error) {
-    console.error('[DB] Error saving commessa:', error);
-    throw error;
-  }
+  const existing = await db.getFirstAsync<Commessa>('SELECT * FROM commesse WHERE name = ?', [name]);
+  if (existing) return existing;
+  
+  const id = generateUUID();
+  await db.runAsync('INSERT INTO commesse (id, name) VALUES (?, ?)', [id, name]);
+  return { id, name };
 };
 
 export const deleteCommessa = async (commessaId: string): Promise<void> => {
-  if (useAsyncStorage || !db) {
-    const commesse = await getAsyncData<Commessa[]>(STORAGE_KEYS.COMMESSE, []);
-    const commessa = commesse.find(c => c.id === commessaId);
-    
+  if (isWeb || !db) {
+    const commessa = memoryDB.commesse.find(c => c.id === commessaId);
     if (commessa) {
-      await setAsyncData(STORAGE_KEYS.COMMESSE, commesse.filter(c => c.id !== commessaId));
-      
-      // Remove from all timesheets
-      const timesheets = await getAsyncData<Timesheet[]>(STORAGE_KEYS.TIMESHEETS, []);
-      const updated = timesheets.map(ts => ({
+      memoryDB.commesse = memoryDB.commesse.filter(c => c.id !== commessaId);
+      memoryDB.timesheets = memoryDB.timesheets.map(ts => ({
         ...ts,
         rows: ts.rows.filter(r => r.commessa !== commessa.name)
       }));
-      await setAsyncData(STORAGE_KEYS.TIMESHEETS, updated);
     }
     return;
   }
   
-  try {
-    // Get commessa name first
-    const commessa = await db.getFirstAsync<Commessa>(
-      'SELECT * FROM commesse WHERE id = ?',
-      [commessaId]
-    );
-    
-    if (commessa) {
-      // Delete from commesse table
-      await db.runAsync('DELETE FROM commesse WHERE id = ?', [commessaId]);
-      
-      // Remove this commessa from all timesheets
-      const timesheets = await db.getAllAsync<any>('SELECT * FROM timesheets');
-      for (const ts of timesheets) {
-        const rows: TimesheetRow[] = JSON.parse(ts.rows);
-        const filteredRows = rows.filter(r => r.commessa !== commessa.name);
-        if (filteredRows.length !== rows.length) {
-          await db.runAsync(
-            'UPDATE timesheets SET rows = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [JSON.stringify(filteredRows), ts.id]
-          );
-        }
+  const commessa = await db.getFirstAsync<Commessa>('SELECT * FROM commesse WHERE id = ?', [commessaId]);
+  if (commessa) {
+    await db.runAsync('DELETE FROM commesse WHERE id = ?', [commessaId]);
+    const timesheets = await db.getAllAsync<any>('SELECT * FROM timesheets');
+    for (const ts of timesheets) {
+      const rows: TimesheetRow[] = JSON.parse(ts.rows);
+      const filteredRows = rows.filter(r => r.commessa !== commessa.name);
+      if (filteredRows.length !== rows.length) {
+        await db.runAsync('UPDATE timesheets SET rows = ? WHERE id = ?', [JSON.stringify(filteredRows), ts.id]);
       }
     }
-  } catch (error) {
-    console.error('[DB] Error deleting commessa:', error);
   }
 };
 
 // ============ TIMESHEETS ============
-
 export const getTimesheet = async (userId: string, year: number, month: number): Promise<Timesheet | null> => {
-  if (useAsyncStorage || !db) {
-    const timesheets = await getAsyncData<Timesheet[]>(STORAGE_KEYS.TIMESHEETS, []);
-    const ts = timesheets.find(
-      t => t.user_id === userId && t.year === year && t.month === month
-    );
-    return ts || null;
+  if (isWeb || !db) {
+    return memoryDB.timesheets.find(t => t.user_id === userId && t.year === year && t.month === month) || null;
   }
   
   try {
@@ -297,158 +196,149 @@ export const getTimesheet = async (userId: string, year: number, month: number):
       'SELECT * FROM timesheets WHERE user_id = ? AND year = ? AND month = ?',
       [userId, year, month]
     );
-    
     if (!result) return null;
-    
-    return {
-      ...result,
-      rows: JSON.parse(result.rows)
-    };
-  } catch (error) {
-    console.error('[DB] Error getting timesheet:', error);
+    return { ...result, rows: JSON.parse(result.rows) };
+  } catch (e) {
+    console.error('[DB] getTimesheet error:', e);
     return null;
   }
 };
 
-export const saveTimesheet = async (
-  userId: string,
-  year: number,
-  month: number,
-  rows: TimesheetRow[]
-): Promise<Timesheet> => {
-  // Save new commesse
+export const saveTimesheet = async (userId: string, year: number, month: number, rows: TimesheetRow[]): Promise<Timesheet> => {
   for (const row of rows) {
-    if (row.commessa && row.commessa.trim()) {
-      await saveCommessa(row.commessa.trim());
-    }
+    if (row.commessa?.trim()) await saveCommessa(row.commessa.trim());
   }
   
-  const filteredRows = rows.filter(r => r.commessa && r.commessa.trim() !== '');
+  const filteredRows = rows.filter(r => r.commessa?.trim());
   
-  if (useAsyncStorage || !db) {
-    const timesheets = await getAsyncData<Timesheet[]>(STORAGE_KEYS.TIMESHEETS, []);
-    const existingIndex = timesheets.findIndex(
-      t => t.user_id === userId && t.year === year && t.month === month
-    );
-    
-    const timesheet: Timesheet = {
-      id: existingIndex >= 0 ? timesheets[existingIndex].id : generateUUID(),
-      user_id: userId,
-      month,
-      year,
-      rows: filteredRows,
-      created_at: existingIndex >= 0 ? timesheets[existingIndex].created_at : new Date().toISOString(),
+  if (isWeb || !db) {
+    const idx = memoryDB.timesheets.findIndex(t => t.user_id === userId && t.year === year && t.month === month);
+    const ts: Timesheet = {
+      id: idx >= 0 ? memoryDB.timesheets[idx].id : generateUUID(),
+      user_id: userId, month, year, rows: filteredRows,
       updated_at: new Date().toISOString()
     };
-    
-    if (existingIndex >= 0) {
-      timesheets[existingIndex] = timesheet;
-    } else {
-      timesheets.push(timesheet);
-    }
-    await setAsyncData(STORAGE_KEYS.TIMESHEETS, timesheets);
-    return timesheet;
+    if (idx >= 0) memoryDB.timesheets[idx] = ts;
+    else memoryDB.timesheets.push(ts);
+    return ts;
   }
   
-  try {
-    const rowsJson = JSON.stringify(filteredRows);
-    
-    // Check if exists
-    const existing = await db.getFirstAsync<any>(
-      'SELECT * FROM timesheets WHERE user_id = ? AND year = ? AND month = ?',
-      [userId, year, month]
-    );
-    
-    if (existing) {
-      // Update
-      await db.runAsync(
-        'UPDATE timesheets SET rows = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [rowsJson, existing.id]
-      );
-      return {
-        ...existing,
-        rows: filteredRows,
-        updated_at: new Date().toISOString()
-      };
-    } else {
-      // Insert
-      const id = generateUUID();
-      await db.runAsync(
-        'INSERT INTO timesheets (id, user_id, month, year, rows) VALUES (?, ?, ?, ?, ?)',
-        [id, userId, month, year, rowsJson]
-      );
-      return {
-        id,
-        user_id: userId,
-        month,
-        year,
-        rows: filteredRows
-      };
-    }
-  } catch (error) {
-    console.error('[DB] Error saving timesheet:', error);
-    throw error;
+  const rowsJson = JSON.stringify(filteredRows);
+  const existing = await db.getFirstAsync<any>(
+    'SELECT * FROM timesheets WHERE user_id = ? AND year = ? AND month = ?',
+    [userId, year, month]
+  );
+  
+  if (existing) {
+    await db.runAsync('UPDATE timesheets SET rows = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [rowsJson, existing.id]);
+    return { ...existing, rows: filteredRows };
+  } else {
+    const id = generateUUID();
+    await db.runAsync('INSERT INTO timesheets (id, user_id, month, year, rows) VALUES (?, ?, ?, ?, ?)', [id, userId, month, year, rowsJson]);
+    return { id, user_id: userId, month, year, rows: filteredRows };
   }
 };
 
-export const getTimesheets = async (userId?: string, year?: number): Promise<Timesheet[]> => {
-  if (useAsyncStorage || !db) {
-    let results = await getAsyncData<Timesheet[]>(STORAGE_KEYS.TIMESHEETS, []);
-    if (userId) {
-      results = results.filter(t => t.user_id === userId);
-    }
-    if (year) {
-      results = results.filter(t => t.year === year);
-    }
-    return results.sort((a, b) => {
-      if (a.year !== b.year) return b.year - a.year;
-      return a.month - b.month;
-    });
-  }
-  
-  try {
-    let query = 'SELECT * FROM timesheets';
-    const params: any[] = [];
-    const conditions: string[] = [];
-    
-    if (userId) {
-      conditions.push('user_id = ?');
-      params.push(userId);
-    }
-    if (year) {
-      conditions.push('year = ?');
-      params.push(year);
-    }
-    
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
-    
-    query += ' ORDER BY year DESC, month';
-    
-    const results = await db.getAllAsync<any>(query, params);
-    
-    return results.map(r => ({
-      ...r,
-      rows: JSON.parse(r.rows)
-    }));
-  } catch (error) {
-    console.error('[DB] Error getting timesheets:', error);
-    return [];
-  }
-};
-
-// Get all timesheets for a specific month/year (for summary report)
 export const getAllTimesheetsForMonth = async (year: number, month: number): Promise<{user: User, timesheet: Timesheet}[]> => {
   const results: {user: User, timesheet: Timesheet}[] = [];
   const users = await getUsers();
   
   for (const user of users) {
     const timesheet = await getTimesheet(user.id, year, month);
-    if (timesheet && timesheet.rows && timesheet.rows.length > 0) {
+    if (timesheet?.rows?.length > 0) {
       results.push({ user, timesheet });
     }
   }
-  
   return results;
+};
+
+// ============ BACKUP / RESTORE ============
+export const exportAllData = async (): Promise<string> => {
+  const users = await getUsers();
+  const commesse = await getCommesse();
+  
+  // Get all timesheets
+  let timesheets: Timesheet[] = [];
+  if (isWeb || !db) {
+    timesheets = memoryDB.timesheets;
+  } else {
+    const results = await db.getAllAsync<any>('SELECT * FROM timesheets');
+    timesheets = results.map(r => ({ ...r, rows: JSON.parse(r.rows) }));
+  }
+  
+  const backup = {
+    version: 1,
+    exportDate: new Date().toISOString(),
+    users,
+    commesse,
+    timesheets
+  };
+  
+  return JSON.stringify(backup, null, 2);
+};
+
+export const importAllData = async (jsonData: string): Promise<{ users: number, commesse: number, timesheets: number }> => {
+  const backup = JSON.parse(jsonData);
+  
+  let usersImported = 0;
+  let commesseImported = 0;
+  let timesheetsImported = 0;
+  
+  // Import users
+  for (const user of backup.users || []) {
+    try {
+      if (isWeb || !db) {
+        if (!memoryDB.users.find(u => u.id === user.id)) {
+          memoryDB.users.push(user);
+          usersImported++;
+        }
+      } else {
+        const existing = await db.getFirstAsync('SELECT * FROM users WHERE id = ?', [user.id]);
+        if (!existing) {
+          await db.runAsync('INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)', [user.id, user.name, user.created_at || new Date().toISOString()]);
+          usersImported++;
+        }
+      }
+    } catch (e) { console.log('User import error:', e); }
+  }
+  
+  // Import commesse
+  for (const commessa of backup.commesse || []) {
+    try {
+      if (isWeb || !db) {
+        if (!memoryDB.commesse.find(c => c.id === commessa.id)) {
+          memoryDB.commesse.push(commessa);
+          commesseImported++;
+        }
+      } else {
+        const existing = await db.getFirstAsync('SELECT * FROM commesse WHERE id = ?', [commessa.id]);
+        if (!existing) {
+          await db.runAsync('INSERT INTO commesse (id, name, created_at) VALUES (?, ?, ?)', [commessa.id, commessa.name, commessa.created_at || new Date().toISOString()]);
+          commesseImported++;
+        }
+      }
+    } catch (e) { console.log('Commessa import error:', e); }
+  }
+  
+  // Import timesheets
+  for (const ts of backup.timesheets || []) {
+    try {
+      if (isWeb || !db) {
+        const idx = memoryDB.timesheets.findIndex(t => t.user_id === ts.user_id && t.year === ts.year && t.month === ts.month);
+        if (idx < 0) {
+          memoryDB.timesheets.push(ts);
+          timesheetsImported++;
+        }
+      } else {
+        const existing = await db.getFirstAsync('SELECT * FROM timesheets WHERE user_id = ? AND year = ? AND month = ?', [ts.user_id, ts.year, ts.month]);
+        if (!existing) {
+          await db.runAsync('INSERT INTO timesheets (id, user_id, month, year, rows, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)', 
+            [ts.id, ts.user_id, ts.month, ts.year, JSON.stringify(ts.rows), ts.created_at || new Date().toISOString(), ts.updated_at || new Date().toISOString()]);
+          timesheetsImported++;
+        }
+      }
+    } catch (e) { console.log('Timesheet import error:', e); }
+  }
+  
+  return { users: usersImported, commesse: commesseImported, timesheets: timesheetsImported };
 };
