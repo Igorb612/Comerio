@@ -624,6 +624,95 @@ export default function TimesheetApp() {
     }
   };
 
+  const handleShareSummaryWhatsApp = async () => {
+    if (!selectedUser) return;
+    setPdfLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        const monthName = ITALIAN_MONTHS[summaryMonth - 1];
+        const byteCharacters = atob(data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const file = new File([blob], data.filename, { type: 'application/pdf' });
+        
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: `Riepilogo ${monthName} ${summaryYear}`,
+              text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
+            });
+            setShowSummaryModal(false);
+          } catch (shareError: any) {
+            if (shareError.name !== 'AbortError') {
+              console.error('Share error:', shareError);
+            }
+          }
+        } else {
+          // Fallback: open WhatsApp web
+          const text = encodeURIComponent(`Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`);
+          window.open(`https://wa.me/?text=${text}`, '_blank');
+        }
+      }
+    } catch (error) {
+      console.error('Error sharing summary via WhatsApp:', error);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleShareSummaryEmail = async () => {
+    if (!selectedUser) return;
+    setPdfLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        const monthName = ITALIAN_MONTHS[summaryMonth - 1];
+        const byteCharacters = atob(data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const file = new File([blob], data.filename, { type: 'application/pdf' });
+        
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: `Riepilogo ${monthName} ${summaryYear}`,
+              text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
+            });
+            setShowSummaryModal(false);
+          } catch (shareError: any) {
+            if (shareError.name !== 'AbortError') {
+              console.error('Share error:', shareError);
+            }
+          }
+        } else {
+          // Fallback: mailto link
+          const subject = encodeURIComponent(`Riepilogo ore ${monthName} ${summaryYear} - ${selectedUser.name}`);
+          const body = encodeURIComponent(`In allegato il riepilogo ore di ${monthName} ${summaryYear}.\n\nCordiali saluti,\n${selectedUser.name}`);
+          window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+        }
+      }
+    } catch (error) {
+      console.error('Error sharing summary via Email:', error);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const handleShareSummary = async () => {
     if (!selectedUser) return;
     setPdfLoading(true);
@@ -1668,7 +1757,7 @@ export default function TimesheetApp() {
               </View>
             </View>
             
-            <View style={styles.summaryButtons}>
+            <View style={styles.summaryButtonsRow}>
               <TouchableOpacity
                 style={styles.summaryPreviewButton}
                 onPress={() => {
@@ -1688,15 +1777,27 @@ export default function TimesheetApp() {
                 <Ionicons name="print" size={18} color="#fff" />
                 <Text style={styles.summaryButtonText}>Stampa</Text>
               </TouchableOpacity>
-              
+            </View>
+            
+            <View style={styles.summaryButtonsRow}>
               <TouchableOpacity
-                style={styles.summarySendButton}
+                style={styles.summaryWhatsAppButton}
                 onPress={() => {
-                  handleShareSummary();
+                  handleShareSummaryWhatsApp();
                 }}
               >
-                <Ionicons name="share-outline" size={18} color="#fff" />
-                <Text style={styles.summaryButtonText}>Invia</Text>
+                <Ionicons name="logo-whatsapp" size={18} color="#fff" />
+                <Text style={styles.summaryButtonText}>WhatsApp</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.summaryEmailButton}
+                onPress={() => {
+                  handleShareSummaryEmail();
+                }}
+              >
+                <Ionicons name="mail" size={18} color="#fff" />
+                <Text style={styles.summaryButtonText}>Email</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2299,6 +2400,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 20,
   },
+  summaryButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
   summaryPreviewButton: {
     flex: 1,
     flexDirection: 'row',
@@ -2325,6 +2431,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+  },
+  summaryWhatsAppButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#25D366',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+  },
+  summaryEmailButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EA4335',
     paddingVertical: 12,
     borderRadius: 10,
     gap: 6,
