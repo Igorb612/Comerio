@@ -502,14 +502,14 @@ async def generate_summary_pdf(user_id: str, year: int, month: int):
     except Exception as e:
         print(f"Could not load logo: {e}")
     
-    # Title style
+    # Title style - Green
     title_style = ParagraphStyle(
         'ReportTitle',
         parent=styles['Heading1'],
         fontSize=20,
         alignment=1,
         spaceAfter=5*mm,
-        textColor=colors.HexColor('#1976D2'),
+        textColor=colors.HexColor('#2E7D32'),
         fontName='Helvetica-Bold'
     )
     
@@ -524,14 +524,14 @@ async def generate_summary_pdf(user_id: str, year: int, month: int):
         fontName='Helvetica'
     )
     
-    # Month style
+    # Month style - Green
     month_style = ParagraphStyle(
         'MonthStyle',
         parent=styles['Normal'],
         fontSize=16,
         alignment=1,
         spaceAfter=10*mm,
-        textColor=colors.HexColor('#E65100'),
+        textColor=colors.HexColor('#2E7D32'),
         fontName='Helvetica-Bold'
     )
     
@@ -571,13 +571,13 @@ async def generate_summary_pdf(user_id: str, year: int, month: int):
     table_data.append(["TOTALE GENERALE", str(grand_total).replace('.', ',')])
     
     if len(table_data) > 1:
-        # Create table with elegant styling
+        # Create table with elegant styling - White and Green
         col_widths = [110*mm, 40*mm]
         table = Table(table_data, colWidths=col_widths)
         
         table_style = TableStyle([
-            # Header
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
+            # Header - Green
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E7D32')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 12),
@@ -596,18 +596,18 @@ async def generate_summary_pdf(user_id: str, year: int, month: int):
             ('LEFTPADDING', (0, 0), (-1, -1), 15),
             ('RIGHTPADDING', (0, 0), (-1, -1), 15),
             
-            # Alternating row colors
-            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f5f5f5')]),
+            # Alternating row colors - white only
+            ('BACKGROUND', (0, 1), (-1, -2), colors.white),
             
-            # Total row
-            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E65100')),
+            # Total row - Dark Green
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#1B5E20')),
             ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
             ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, -1), (-1, -1), 13),
             
-            # Grid
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#dddddd')),
-            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#1976D2')),
+            # Grid - Light gray
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e0e0e0')),
+            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#2E7D32')),
         ])
         
         table.setStyle(table_style)
