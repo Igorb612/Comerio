@@ -21,9 +21,13 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import * as MailComposer from 'expo-mail-composer';
+import * as OfflineDB from './offlineStorage';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
+
+// Use offline mode - set to true for fully offline PWA
+const USE_OFFLINE_MODE = true;
 
 // Types
 interface TimesheetRow {
@@ -120,11 +124,22 @@ export default function TimesheetApp() {
 
   const numDays = getDaysInMonth(selectedMonth, selectedYear);
 
-  // Fetch app info and users on mount
+  // Initialize offline DB and fetch data on mount
   useEffect(() => {
-    fetchAppInfo();
-    fetchCommesse();
-    fetchUsers();
+    const initApp = async () => {
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        try {
+          await OfflineDB.initDB();
+          console.log('IndexedDB initialized for offline mode');
+        } catch (err) {
+          console.error('Failed to initialize IndexedDB:', err);
+        }
+      }
+      fetchAppInfo();
+      fetchCommesse();
+      fetchUsers();
+    };
+    initApp();
   }, []);
 
   // Fetch timesheet when month, year, or user changes
@@ -139,23 +154,30 @@ export default function TimesheetApp() {
   }, [selectedMonth, selectedYear, selectedUser]);
 
   const fetchAppInfo = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/info`);
-      const data = await response.json();
-      setAppInfo(data);
-    } catch (error) {
-      console.error('Error fetching app info:', error);
-    }
+    // App info is static, no need for API call
+    setAppInfo({
+      current_year: new Date().getFullYear(),
+      months: ITALIAN_MONTHS
+    });
   };
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/users`);
-      const data = await response.json();
-      setUsers(data);
-      // Auto-select first user if available
-      if (data.length > 0 && !selectedUser) {
-        setSelectedUser(data[0]);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        // Use IndexedDB
+        const data = await OfflineDB.getUsers();
+        setUsers(data);
+        if (data.length > 0 && !selectedUser) {
+          setSelectedUser(data[0]);
+        }
+      } else {
+        // Use API
+        const response = await fetch(`${API_URL}/api/users`);
+        const data = await response.json();
+        setUsers(data);
+        if (data.length > 0 && !selectedUser) {
+          setSelectedUser(data[0]);
+        }
       }
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -164,20 +186,31 @@ export default function TimesheetApp() {
 
   const createUser = async (name: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      if (response.ok) {
-        const newUser = await response.json();
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        // Use IndexedDB
+        const newUser = await OfflineDB.createUser(name);
         setUsers([...users, newUser]);
         setSelectedUser(newUser);
         setNewUserInput('');
         setShowUserPicker(false);
         return true;
+      } else {
+        // Use API
+        const response = await fetch(`${API_URL}/api/users`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        if (response.ok) {
+          const newUser = await response.json();
+          setUsers([...users, newUser]);
+          setSelectedUser(newUser);
+          setNewUserInput('');
+          setShowUserPicker(false);
+          return true;
+        }
+        return false;
       }
-      return false;
     } catch (error) {
       console.error('Error creating user:', error);
       return false;
@@ -189,20 +222,17 @@ export default function TimesheetApp() {
       const confirmed = window.confirm(`Vuoi eliminare l'utente "${user.name}" e tutti i suoi dati?`);
       if (confirmed) {
         try {
-          const response = await fetch(`${API_URL}/api/users/${user.id}`, {
-            method: 'DELETE',
-          });
-          if (response.ok) {
-            const updatedUsers = users.filter(u => u.id !== user.id);
-            setUsers(updatedUsers);
-            // If deleted user was selected, select another one or null
-            if (selectedUser?.id === user.id) {
-              setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
-            }
-            alert('Utente e tutti i dati relativi eliminati');
+          if (USE_OFFLINE_MODE) {
+            await OfflineDB.deleteUser(user.id);
           } else {
-            alert('Errore durante l\'eliminazione');
+            await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
           }
+          const updatedUsers = users.filter(u => u.id !== user.id);
+          setUsers(updatedUsers);
+          if (selectedUser?.id === user.id) {
+            setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
+          }
+          alert('Utente e tutti i dati relativi eliminati');
         } catch (error) {
           console.error('Error deleting user:', error);
           alert('Errore durante l\'eliminazione');
@@ -219,19 +249,17 @@ export default function TimesheetApp() {
             style: 'destructive',
             onPress: async () => {
               try {
-                const response = await fetch(`${API_URL}/api/users/${user.id}`, {
-                  method: 'DELETE',
-                });
-                if (response.ok) {
-                  const updatedUsers = users.filter(u => u.id !== user.id);
-                  setUsers(updatedUsers);
-                  if (selectedUser?.id === user.id) {
-                    setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
-                  }
-                  Alert.alert('Eliminato', 'Utente e tutti i dati relativi eliminati');
+                if (USE_OFFLINE_MODE) {
+                  await OfflineDB.deleteUser(user.id);
                 } else {
-                  Alert.alert('Errore', 'Errore durante l\'eliminazione');
+                  await fetch(`${API_URL}/api/users/${user.id}`, { method: 'DELETE' });
                 }
+                const updatedUsers = users.filter(u => u.id !== user.id);
+                setUsers(updatedUsers);
+                if (selectedUser?.id === user.id) {
+                  setSelectedUser(updatedUsers.length > 0 ? updatedUsers[0] : null);
+                }
+                Alert.alert('Eliminato', 'Utente e tutti i dati relativi eliminati');
               } catch (error) {
                 console.error('Error deleting user:', error);
                 Alert.alert('Errore', 'Errore durante l\'eliminazione');
@@ -245,9 +273,14 @@ export default function TimesheetApp() {
 
   const fetchCommesse = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/commesse`);
-      const data = await response.json();
-      setCommesse(data);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        const data = await OfflineDB.getCommesse();
+        setCommesse(data);
+      } else {
+        const response = await fetch(`${API_URL}/api/commesse`);
+        const data = await response.json();
+        setCommesse(data);
+      }
     } catch (error) {
       console.error('Error fetching commesse:', error);
     }
@@ -261,16 +294,25 @@ export default function TimesheetApp() {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}`);
-      if (response.ok) {
-        const data = await response.json();
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        const data = await OfflineDB.getTimesheet(selectedUser.id, selectedYear, selectedMonth);
         if (data) {
           setRows(data.rows || []);
         } else {
           setRows([]);
         }
       } else {
-        setRows([]);
+        const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${selectedYear}/${selectedMonth}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data) {
+            setRows(data.rows || []);
+          } else {
+            setRows([]);
+          }
+        } else {
+          setRows([]);
+        }
       }
     } catch (error) {
       console.error('Error fetching timesheet:', error);
@@ -283,9 +325,14 @@ export default function TimesheetApp() {
   const fetchArchivedTimesheets = async () => {
     if (!selectedUser) return;
     try {
-      const response = await fetch(`${API_URL}/api/timesheets?user_id=${selectedUser.id}&year=${selectedYear}`);
-      const data = await response.json();
-      setArchivedTimesheets(data);
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        const data = await OfflineDB.getTimesheets(selectedUser.id, selectedYear);
+        setArchivedTimesheets(data);
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets?user_id=${selectedUser.id}&year=${selectedYear}`);
+        const data = await response.json();
+        setArchivedTimesheets(data);
+      }
     } catch (error) {
       console.error('Error fetching archived timesheets:', error);
     }
@@ -295,21 +342,32 @@ export default function TimesheetApp() {
     if (!selectedUser) return false;
     setSaving(true);
     try {
-      const response = await fetch(`${API_URL}/api/timesheets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: selectedUser.id,
-          month: selectedMonth,
-          year: selectedYear,
-          rows: newRows.filter(r => r.commessa.trim() !== '')
-        })
-      });
-      if (response.ok) {
+      if (USE_OFFLINE_MODE && Platform.OS === 'web') {
+        await OfflineDB.saveTimesheet(
+          selectedUser.id,
+          selectedYear,
+          selectedMonth,
+          newRows.filter(r => r.commessa.trim() !== '')
+        );
         await fetchCommesse();
         return true;
+      } else {
+        const response = await fetch(`${API_URL}/api/timesheets`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: selectedUser.id,
+            month: selectedMonth,
+            year: selectedYear,
+            rows: newRows.filter(r => r.commessa.trim() !== '')
+          })
+        });
+        if (response.ok) {
+          await fetchCommesse();
+          return true;
+        }
+        return false;
       }
-      return false;
     } catch (error) {
       console.error('Error saving timesheet:', error);
       return false;
