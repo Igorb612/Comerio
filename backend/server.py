@@ -14,7 +14,7 @@ import calendar
 from io import BytesIO
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, cm
 from reportlab.pdfbase import pdfmetrics
@@ -453,6 +453,203 @@ async def download_pdf(user_id: str, year: int, month: int):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={result['filename']}"}
     )
+
+# Summary Report - Portrait A4 with logo
+LOGO_URL = "https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png"
+
+@api_router.get("/timesheets/{user_id}/{year}/{month}/summary")
+async def generate_summary_pdf(user_id: str, year: int, month: int):
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month")
+    
+    # Get user info
+    user = await db.users.find_one({"id": user_id})
+    user_name = user["name"] if user else "Utente"
+    
+    timesheet = await db.timesheets.find_one({"user_id": user_id, "month": month, "year": year})
+    
+    # Create PDF buffer
+    buffer = BytesIO()
+    
+    # A4 Portrait
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=20*mm,
+        rightMargin=20*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Try to fetch and add logo
+    try:
+        import urllib.request
+        logo_data = urllib.request.urlopen(LOGO_URL).read()
+        logo_buffer = BytesIO(logo_data)
+        logo = RLImage(logo_buffer, width=150, height=49)
+        
+        # Center the logo
+        logo_table = Table([[logo]], colWidths=[170*mm])
+        logo_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        elements.append(logo_table)
+        elements.append(Spacer(1, 10*mm))
+    except Exception as e:
+        print(f"Could not load logo: {e}")
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'ReportTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        alignment=1,
+        spaceAfter=5*mm,
+        textColor=colors.HexColor('#1976D2'),
+        fontName='Helvetica-Bold'
+    )
+    
+    # Subtitle style
+    subtitle_style = ParagraphStyle(
+        'ReportSubtitle',
+        parent=styles['Normal'],
+        fontSize=14,
+        alignment=1,
+        spaceAfter=3*mm,
+        textColor=colors.black,
+        fontName='Helvetica'
+    )
+    
+    # Month style
+    month_style = ParagraphStyle(
+        'MonthStyle',
+        parent=styles['Normal'],
+        fontSize=16,
+        alignment=1,
+        spaceAfter=10*mm,
+        textColor=colors.HexColor('#E65100'),
+        fontName='Helvetica-Bold'
+    )
+    
+    # Add title
+    elements.append(Paragraph("RIEPILOGO ORE", title_style))
+    elements.append(Paragraph(user_name.upper(), subtitle_style))
+    
+    month_name = ITALIAN_MONTHS[month - 1].capitalize()
+    elements.append(Paragraph(f"{month_name} {year}", month_style))
+    
+    elements.append(Spacer(1, 5*mm))
+    
+    # Calculate totals per commessa
+    commessa_totals = {}
+    grand_total = 0.0
+    num_days = get_days_in_month(month, year)
+    
+    if timesheet and timesheet.get("rows"):
+        for row in timesheet["rows"]:
+            commessa = row["commessa"]
+            row_total = sum(h for h in row["hours"][:num_days] if h and h > 0)
+            if row_total > 0:
+                if commessa in commessa_totals:
+                    commessa_totals[commessa] += row_total
+                else:
+                    commessa_totals[commessa] = row_total
+                grand_total += row_total
+    
+    # Build table
+    table_data = [["COMMESSA", "ORE TOTALI"]]
+    
+    for commessa, total in sorted(commessa_totals.items()):
+        formatted_total = str(total).replace('.', ',')
+        table_data.append([commessa, formatted_total])
+    
+    # Add grand total row
+    table_data.append(["TOTALE GENERALE", str(grand_total).replace('.', ',')])
+    
+    if len(table_data) > 1:
+        # Create table with elegant styling
+        col_widths = [110*mm, 40*mm]
+        table = Table(table_data, colWidths=col_widths)
+        
+        table_style = TableStyle([
+            # Header
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            
+            # Data rows
+            ('FONTNAME', (0, 1), (-1, -2), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -2), 11),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+            ('TOPPADDING', (0, 1), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 15),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+            
+            # Alternating row colors
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f5f5f5')]),
+            
+            # Total row
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#E65100')),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, -1), (-1, -1), 13),
+            
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#dddddd')),
+            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#1976D2')),
+        ])
+        
+        table.setStyle(table_style)
+        elements.append(table)
+    else:
+        # No data message
+        no_data_style = ParagraphStyle(
+            'NoData',
+            parent=styles['Normal'],
+            fontSize=14,
+            alignment=1,
+            textColor=colors.gray,
+            fontName='Helvetica-Oblique'
+        )
+        elements.append(Spacer(1, 20*mm))
+        elements.append(Paragraph("Nessuna ora registrata per questo mese", no_data_style))
+    
+    # Add footer with date
+    elements.append(Spacer(1, 15*mm))
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=9,
+        alignment=1,
+        textColor=colors.gray,
+        fontName='Helvetica'
+    )
+    from datetime import datetime as dt
+    generated_date = dt.now().strftime("%d/%m/%Y %H:%M")
+    elements.append(Paragraph(f"Documento generato il {generated_date}", footer_style))
+    
+    # Build PDF
+    doc.build(elements)
+    
+    # Get PDF data
+    buffer.seek(0)
+    pdf_data = buffer.getvalue()
+    
+    return {
+        "pdf_base64": base64.b64encode(pdf_data).decode('utf-8'),
+        "filename": f"riepilogo_{month_name}_{year}.pdf"
+    }
 
 # Include the router in the main app
 app.include_router(api_router)

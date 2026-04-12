@@ -98,6 +98,9 @@ export default function TimesheetApp() {
   const [showArchive, setShowArchive] = useState(false);
   const [archivedTimesheets, setArchivedTimesheets] = useState<Timesheet[]>([]);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [summaryMonth, setSummaryMonth] = useState<number>(new Date().getMonth() + 1);
+  const [summaryYear, setSummaryYear] = useState<number>(new Date().getFullYear());
 
   // User state
   const [users, setUsers] = useState<User[]>([]);
@@ -542,6 +545,82 @@ export default function TimesheetApp() {
       Alert.alert('Errore', 'Errore durante la stampa del PDF');
     } finally {
       setPdfLoading(false);
+    }
+  };
+
+  // Summary report functions
+  const handlePreviewSummary = async () => {
+    if (!selectedUser) return;
+    setPdfLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        if (Platform.OS === 'web') {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        } else {
+          await Print.printAsync({
+            uri: `data:application/pdf;base64,${data.pdf_base64}`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      Alert.alert('Errore', 'Errore durante la generazione del riassunto');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handlePrintSummary = async () => {
+    if (!selectedUser) return;
+    setPdfLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        if (Platform.OS === 'web') {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.src = url;
+          document.body.appendChild(iframe);
+          
+          iframe.onload = () => {
+            setTimeout(() => {
+              iframe.contentWindow?.print();
+            }, 500);
+          };
+        } else {
+          await Print.printAsync({
+            uri: `data:application/pdf;base64,${data.pdf_base64}`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error printing summary:', error);
+      Alert.alert('Errore', 'Errore durante la stampa del riassunto');
+    } finally {
+      setPdfLoading(false);
+      setShowSummaryModal(false);
     }
   };
 
@@ -1099,6 +1178,15 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Stampa</Text>
         </TouchableOpacity>
         
+        <TouchableOpacity style={styles.bottomButton} onPress={() => {
+          setSummaryMonth(selectedMonth);
+          setSummaryYear(selectedYear);
+          setShowSummaryModal(true);
+        }} disabled={pdfLoading}>
+          <Ionicons name="document-text" size={20} color="#00BCD4" />
+          <Text style={styles.bottomButtonText}>Riassunto</Text>
+        </TouchableOpacity>
+        
         <TouchableOpacity style={styles.bottomButton} onPress={handleShareWhatsApp} disabled={pdfLoading}>
           <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
           <Text style={styles.bottomButtonText}>WhatsApp</Text>
@@ -1107,11 +1195,6 @@ export default function TimesheetApp() {
         <TouchableOpacity style={styles.bottomButton} onPress={handleSendEmail} disabled={pdfLoading}>
           <Ionicons name="mail" size={20} color="#EA4335" />
           <Text style={styles.bottomButtonText}>Email</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.bottomButton} onPress={openArchive}>
-          <Ionicons name="archive" size={20} color="#607D8B" />
-          <Text style={styles.bottomButtonText}>Archivio</Text>
         </TouchableOpacity>
       </View>
 
@@ -1432,6 +1515,91 @@ export default function TimesheetApp() {
             </ScrollView>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Summary Modal - Choose month/year */}
+      <Modal visible={showSummaryModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowSummaryModal(false)}
+          />
+          <View style={styles.summaryModalContent}>
+            <Text style={styles.modalTitle}>Stampa Riassunto</Text>
+            <Text style={styles.summarySubtitle}>Seleziona mese e anno</Text>
+            
+            <View style={styles.summarySelectors}>
+              <View style={styles.summarySelector}>
+                <Text style={styles.summarySelectorLabel}>Mese</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {ITALIAN_MONTHS.map((month, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.summaryItem,
+                        summaryMonth === index + 1 && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setSummaryMonth(index + 1)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        summaryMonth === index + 1 && styles.summaryItemTextSelected
+                      ]}>
+                        {month}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              
+              <View style={styles.summarySelector}>
+                <Text style={styles.summarySelectorLabel}>Anno</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {availableYears.map((year) => (
+                    <TouchableOpacity
+                      key={year}
+                      style={[
+                        styles.summaryItem,
+                        summaryYear === year && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setSummaryYear(year)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        summaryYear === year && styles.summaryItemTextSelected
+                      ]}>
+                        {year}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+            
+            <View style={styles.summaryButtons}>
+              <TouchableOpacity
+                style={styles.summaryPreviewButton}
+                onPress={() => {
+                  handlePreviewSummary();
+                }}
+              >
+                <Ionicons name="eye" size={20} color="#fff" />
+                <Text style={styles.summaryButtonText}>Anteprima</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.summaryPrintButton}
+                onPress={() => {
+                  handlePrintSummary();
+                }}
+              >
+                <Ionicons name="print" size={20} color="#fff" />
+                <Text style={styles.summaryButtonText}>Stampa</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       {/* Loading overlay for PDF */}
@@ -1973,5 +2141,86 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 12,
     fontStyle: 'italic',
+  },
+  summaryModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+  },
+  summarySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  summarySelectors: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  summarySelector: {
+    flex: 1,
+  },
+  summarySelectorLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  summaryScrollList: {
+    maxHeight: 200,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+  },
+  summaryItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  summaryItemSelected: {
+    backgroundColor: '#e3f2fd',
+  },
+  summaryItemText: {
+    fontSize: 14,
+    color: '#333',
+    textAlign: 'center',
+  },
+  summaryItemTextSelected: {
+    color: '#1976D2',
+    fontWeight: '600',
+  },
+  summaryButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  summaryPreviewButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF9800',
+    paddingVertical: 14,
+    borderRadius: 10,
+    gap: 8,
+  },
+  summaryPrintButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#00BCD4',
+    paddingVertical: 14,
+    borderRadius: 10,
+    gap: 8,
+  },
+  summaryButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
