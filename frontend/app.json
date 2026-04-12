@@ -8,10 +8,14 @@
     "scheme": "timesheetcomerio",
     "owner": "igorb612",
     "android": {
-      "package": "com.comerio.timesheet"
+      "package": "com.comerio.timesheet",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {
