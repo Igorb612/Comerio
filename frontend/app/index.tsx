@@ -748,67 +748,90 @@ export default function TimesheetApp() {
     `;
   };
 
-  // Generate HTML for Summary report (all users)
+  // Generate HTML for Summary report (single user - hours by commessa)
+  // Matches the backend PDF style exactly
   const generateSummaryHtml = async (year: number, month: number): Promise<string> => {
+    if (!selectedUser) {
+      return `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h1>Errore</h1>
+          <p>Seleziona un utente prima di generare il riassunto.</p>
+        </body>
+        </html>
+      `;
+    }
+    
     const monthName = ITALIAN_MONTHS[month - 1];
     const daysInMonth = getDaysInMonth(month, year);
     
-    // Get all timesheets for this month from local database
-    const allTimesheets = await LocalDB.getAllTimesheetsForMonth(year, month);
+    // Get timesheet for selected user
+    const timesheet = await LocalDB.getTimesheet(selectedUser.id, year, month);
     
-    if (allTimesheets.length === 0) {
+    // Calculate totals per commessa
+    const commessaTotals: { [key: string]: number } = {};
+    let grandTotal = 0;
+    
+    if (timesheet && timesheet.rows) {
+      for (const row of timesheet.rows) {
+        const rowTotal = row.hours.slice(0, daysInMonth).reduce((sum, h) => sum + (h || 0), 0);
+        if (rowTotal > 0) {
+          if (commessaTotals[row.commessa]) {
+            commessaTotals[row.commessa] += rowTotal;
+          } else {
+            commessaTotals[row.commessa] = rowTotal;
+          }
+          grandTotal += rowTotal;
+        }
+      }
+    }
+    
+    // Build table rows
+    let tableRows = '';
+    const sortedCommesse = Object.entries(commessaTotals).sort((a, b) => a[0].localeCompare(b[0]));
+    
+    for (const [commessa, total] of sortedCommesse) {
+      tableRows += `
+        <tr>
+          <td style="padding:12px 15px;border:1px solid #e0e0e0;font-size:11pt;">${commessa}</td>
+          <td style="padding:12px 15px;border:1px solid #e0e0e0;text-align:center;font-size:11pt;">${total.toString().replace('.', ',')}</td>
+        </tr>
+      `;
+    }
+    
+    // No data message
+    if (sortedCommesse.length === 0) {
       return `
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="UTF-8">
           <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-            h1 { color: #333; }
-            p { color: #666; font-size: 18px; }
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .logo { max-width: 150px; margin-bottom: 15px; }
+            h1 { color: #2E7D32; font-size: 20pt; margin: 10px 0; }
+            h2 { color: #333; font-size: 14pt; margin: 5px 0; }
+            h3 { color: #2E7D32; font-size: 16pt; margin: 10px 0 20px 0; }
+            .no-data { text-align: center; color: #666; font-style: italic; margin-top: 50px; font-size: 14pt; }
           </style>
         </head>
         <body>
-          <h1>Riepilogo ${monthName} ${year}</h1>
-          <p>Nessun dato disponibile per questo mese.</p>
+          <div class="header">
+            <img src="${LOGO_URL}" class="logo" />
+            <h1>RIEPILOGO ORE</h1>
+            <h2>${selectedUser.name.toUpperCase()}</h2>
+            <h3>${monthName} ${year}</h3>
+          </div>
+          <p class="no-data">Nessuna ora registrata per questo mese</p>
         </body>
         </html>
       `;
     }
     
-    // Build HTML
-    let tableRows = '';
-    let grandTotal = 0;
-    
-    for (const { user, timesheet } of allTimesheets) {
-      // Calculate total hours for this user
-      let userTotal = 0;
-      for (const row of timesheet.rows) {
-        userTotal += row.hours.slice(0, daysInMonth).reduce((sum, h) => sum + (h || 0), 0);
-      }
-      grandTotal += userTotal;
-      
-      // Get commesse summary
-      const commesseSummary: { [key: string]: number } = {};
-      for (const row of timesheet.rows) {
-        const total = row.hours.slice(0, daysInMonth).reduce((sum, h) => sum + (h || 0), 0);
-        if (total > 0) {
-          commesseSummary[row.commessa] = total;
-        }
-      }
-      
-      const commesseText = Object.entries(commesseSummary)
-        .map(([name, hours]) => `${name}: ${hours.toString().replace('.', ',')}h`)
-        .join(', ');
-      
-      tableRows += `
-        <tr>
-          <td style="padding:10px;font-weight:bold;border:1px solid #4CAF50;">${user.name}</td>
-          <td style="padding:10px;text-align:right;font-weight:bold;border:1px solid #4CAF50;font-size:18px;">${userTotal.toString().replace('.', ',')}</td>
-          <td style="padding:10px;font-size:12px;color:#666;border:1px solid #4CAF50;">${commesseText}</td>
-        </tr>
-      `;
-    }
+    const generatedDate = new Date().toLocaleDateString('it-IT') + ' ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
     
     return `
       <!DOCTYPE html>
@@ -818,41 +841,58 @@ export default function TimesheetApp() {
         <style>
           @page { size: A4 portrait; margin: 15mm; }
           body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #fff; }
-          .header { text-align: center; margin-bottom: 30px; }
-          h1 { font-size: 24px; margin: 0; color: #2E7D32; }
-          h2 { font-size: 18px; margin: 10px 0; color: #333; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th { background: #4CAF50; color: white; padding: 12px; text-align: left; }
-          th:nth-child(2) { text-align: right; width: 100px; }
-          .total-row { background: #E8F5E9; }
-          .total-row td { font-weight: bold; font-size: 16px; }
-          .footer { margin-top: 30px; text-align: center; color: #666; font-size: 12px; }
+          .header { text-align: center; margin-bottom: 25px; }
+          .logo { max-width: 150px; margin-bottom: 15px; }
+          h1 { color: #2E7D32; font-size: 20pt; margin: 10px 0; font-weight: bold; }
+          h2 { color: #333; font-size: 14pt; margin: 5px 0; }
+          h3 { color: #2E7D32; font-size: 16pt; margin: 10px 0 25px 0; font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; border: 2px solid #2E7D32; }
+          th { 
+            background: #2E7D32; 
+            color: white; 
+            padding: 12px 15px; 
+            text-align: left; 
+            font-size: 12pt;
+            font-weight: bold;
+          }
+          th:last-child { text-align: center; width: 120px; }
+          td { background: white; }
+          .total-row td { 
+            background: #1B5E20; 
+            color: white; 
+            font-weight: bold; 
+            font-size: 13pt;
+            padding: 12px 15px;
+            border: 1px solid #e0e0e0;
+          }
+          .total-row td:last-child { text-align: center; }
+          .footer { margin-top: 25px; text-align: center; color: #999; font-size: 9pt; }
         </style>
       </head>
       <body>
         <div class="header">
+          <img src="${LOGO_URL}" class="logo" onerror="this.style.display='none'" />
           <h1>RIEPILOGO ORE</h1>
-          <h2>${monthName} ${year}</h2>
+          <h2>${selectedUser.name.toUpperCase()}</h2>
+          <h3>${monthName} ${year}</h3>
         </div>
         <table>
           <thead>
             <tr>
-              <th>Dipendente</th>
-              <th>Ore Totali</th>
-              <th>Dettaglio Commesse</th>
+              <th>COMMESSA</th>
+              <th>ORE TOTALI</th>
             </tr>
           </thead>
           <tbody>
             ${tableRows}
             <tr class="total-row">
-              <td style="padding:12px;border:2px solid #2E7D32;">TOTALE GENERALE</td>
-              <td style="padding:12px;text-align:right;border:2px solid #2E7D32;font-size:20px;">${grandTotal.toString().replace('.', ',')}</td>
-              <td style="padding:12px;border:2px solid #2E7D32;"></td>
+              <td>TOTALE GENERALE</td>
+              <td>${grandTotal.toString().replace('.', ',')}</td>
             </tr>
           </tbody>
         </table>
         <div class="footer">
-          Generato il ${new Date().toLocaleDateString('it-IT')}
+          Documento generato il ${generatedDate}
         </div>
       </body>
       </html>
