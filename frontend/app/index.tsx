@@ -624,6 +624,76 @@ export default function TimesheetApp() {
     }
   };
 
+  const handleShareSummary = async () => {
+    if (!selectedUser) return;
+    setPdfLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/timesheets/${selectedUser.id}/${summaryYear}/${summaryMonth}/summary`);
+      const data = await response.json();
+      
+      if (data.pdf_base64) {
+        const monthName = ITALIAN_MONTHS[summaryMonth - 1];
+        
+        if (Platform.OS === 'web') {
+          const byteCharacters = atob(data.pdf_base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const file = new File([blob], data.filename, { type: 'application/pdf' });
+          
+          // Use Web Share API (works on mobile browsers - includes Email, Bluetooth, etc.)
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: `Riepilogo ${monthName} ${summaryYear}`,
+                text: `Riepilogo ore ${selectedUser.name} - ${monthName} ${summaryYear}`,
+              });
+              setShowSummaryModal(false);
+            } catch (shareError: any) {
+              if (shareError.name !== 'AbortError') {
+                console.error('Share error:', shareError);
+                alert('Errore durante la condivisione');
+              }
+            }
+          } else {
+            // Fallback: download the file
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = data.filename;
+            link.click();
+            alert('File scaricato. Puoi condividerlo manualmente via Email o Bluetooth.');
+            setShowSummaryModal(false);
+          }
+        } else {
+          // Native mobile sharing
+          if (await Sharing.isAvailableAsync()) {
+            const fileUri = `${FileSystem.cacheDirectory}${data.filename}`;
+            await FileSystem.writeAsStringAsync(fileUri, data.pdf_base64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            await Sharing.shareAsync(fileUri, {
+              mimeType: 'application/pdf',
+              dialogTitle: 'Invia riepilogo',
+            });
+            setShowSummaryModal(false);
+          } else {
+            Alert.alert('Info', 'La condivisione non è disponibile su questo dispositivo');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error sharing summary:', error);
+      Alert.alert('Errore', 'Errore durante la condivisione del riassunto');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   // Generate HTML table for PDF
   const generatePdfHtml = () => {
     const daysInMonth = getDaysInMonth(selectedMonth, selectedYear);
@@ -1584,7 +1654,7 @@ export default function TimesheetApp() {
                   handlePreviewSummary();
                 }}
               >
-                <Ionicons name="eye" size={20} color="#fff" />
+                <Ionicons name="eye" size={18} color="#fff" />
                 <Text style={styles.summaryButtonText}>Anteprima</Text>
               </TouchableOpacity>
               
@@ -1594,8 +1664,18 @@ export default function TimesheetApp() {
                   handlePrintSummary();
                 }}
               >
-                <Ionicons name="print" size={20} color="#fff" />
+                <Ionicons name="print" size={18} color="#fff" />
                 <Text style={styles.summaryButtonText}>Stampa</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.summarySendButton}
+                onPress={() => {
+                  handleShareSummary();
+                }}
+              >
+                <Ionicons name="share-outline" size={18} color="#fff" />
+                <Text style={styles.summaryButtonText}>Invia</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2195,7 +2275,7 @@ const styles = StyleSheet.create({
   },
   summaryButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     marginTop: 20,
   },
   summaryPreviewButton: {
@@ -2204,9 +2284,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FF9800',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 10,
-    gap: 8,
+    gap: 6,
   },
   summaryPrintButton: {
     flex: 1,
@@ -2214,13 +2294,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#00BCD4',
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderRadius: 10,
-    gap: 8,
+    gap: 6,
+  },
+  summarySendButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
   },
   summaryButtonText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
   },
 });
