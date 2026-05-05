@@ -1602,7 +1602,7 @@ export default function TimesheetApp() {
       </ScrollView>
 
       {/* Bottom Toolbar */}
-      <View style={styles.bottomToolbar}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bottomToolbar} contentContainerStyle={styles.bottomToolbarContent}>
         <TouchableOpacity style={styles.bottomButton} onPress={handlePreviewPDF} disabled={pdfLoading}>
           <Ionicons name="eye" size={20} color="#FF9800" />
           <Text style={styles.bottomButtonText}>Anteprima</Text>
@@ -1652,11 +1652,11 @@ export default function TimesheetApp() {
             
             <TouchableOpacity style={styles.bottomButton} onPress={handleSendEmail} disabled={pdfLoading}>
               <Ionicons name="mail" size={20} color="#EA4335" />
-              <Text style={styles.bottomButtonText}>Email</Text>
+            <Text style={styles.bottomButtonText}>Email</Text>
             </TouchableOpacity>
           </>
         )}
-      </View>
+      </ScrollView>
 
       {/* Month Picker Modal */}
       <Modal visible={showMonthPicker} transparent animationType="fade">
@@ -2447,11 +2447,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   bottomToolbar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
@@ -2461,10 +2456,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
   },
+  bottomToolbarContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
   bottomButton: {
     alignItems: 'center',
     padding: 8,
-    minWidth: 100,
+    minWidth: 70,
+    marginHorizontal: 4,
   },
   bottomButtonText: {
     fontSize: 12,
