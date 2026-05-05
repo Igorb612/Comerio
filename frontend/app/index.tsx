@@ -1254,42 +1254,46 @@ export default function TimesheetApp() {
         URL.revokeObjectURL(url);
         alert('Backup scaricato! Salvalo in un posto sicuro.');
       } else {
-        // Native: use FileSystem and Sharing
-        const directory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
-        if (!directory) {
-          Alert.alert('Errore', 'Directory non disponibile');
-          return;
-        }
-        
-        const fileUri = `${directory}${filename}`;
-        console.log('[Backup] Writing to:', fileUri);
-        
-        await FileSystem.writeAsStringAsync(fileUri, backupData, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-        console.log('[Backup] File written successfully');
-        
-        const isAvailable = await Sharing.isAvailableAsync();
-        console.log('[Backup] Sharing available:', isAvailable);
-        
-        if (isAvailable) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: 'application/json',
-            dialogTitle: 'Salva Backup Timesheet',
-            UTI: 'public.json',
+        // Android: usa StorageAccessFramework per far scegliere all'utente dove salvare
+        try {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          
+          if (permissions.granted) {
+            const uri = await FileSystem.StorageAccessFramework.createFileAsync(
+              permissions.directoryUri,
+              filename,
+              'application/json'
+            );
+            
+            await FileSystem.writeAsStringAsync(uri, backupData, {
+              encoding: FileSystem.EncodingType.UTF8,
+            });
+            
+            Alert.alert('Backup Salvato!', 'Il file è stato salvato nella cartella che hai scelto.');
+          } else {
+            Alert.alert('Permesso negato', 'Devi permettere l\'accesso alla cartella per salvare il backup.');
+          }
+        } catch (safError: any) {
+          console.log('[Backup] SAF error, trying sharing:', safError);
+          // Fallback: prova con sharing
+          const tempUri = FileSystem.cacheDirectory + filename;
+          await FileSystem.writeAsStringAsync(tempUri, backupData, {
+            encoding: FileSystem.EncodingType.UTF8,
           });
-        } else {
-          // Fallback: save to downloads
-          Alert.alert('Backup Salvato', `File salvato in: ${fileUri}`);
+          
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(tempUri, {
+              mimeType: 'application/json',
+              dialogTitle: 'Salva Backup',
+            });
+          } else {
+            Alert.alert('Errore', 'Impossibile salvare il backup');
+          }
         }
       }
     } catch (error: any) {
       console.error('[Backup] Error:', error);
-      if (Platform.OS === 'web') {
-        alert('Errore durante il salvataggio del backup: ' + error.message);
-      } else {
-        Alert.alert('Errore', 'Errore durante il salvataggio: ' + (error.message || 'Errore sconosciuto'));
-      }
+      Alert.alert('Errore', 'Errore: ' + (error.message || 'Errore sconosciuto'));
     } finally {
       setPdfLoading(false);
     }
