@@ -107,6 +107,9 @@ export default function TimesheetApp() {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [summaryMonth, setSummaryMonth] = useState<number>(new Date().getMonth() + 1);
   const [summaryYear, setSummaryYear] = useState<number>(new Date().getFullYear());
+  const [showPrintAllModal, setShowPrintAllModal] = useState(false);
+  const [printAllMonth, setPrintAllMonth] = useState<number>(new Date().getMonth() + 1);
+  const [printAllYear, setPrintAllYear] = useState<number>(new Date().getFullYear());
 
   // User state
   const [users, setUsers] = useState<User[]>([]);
@@ -771,6 +774,107 @@ export default function TimesheetApp() {
     } catch (error) {
       console.error('Error sharing summary:', error);
       Alert.alert('Errore', 'Errore durante la condivisione');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  // ========== PRINT ALL USERS FUNCTION ==========
+  const generateAllUsersHtml = async (year: number, month: number): Promise<string> => {
+    const monthName = ITALIAN_MONTHS[month - 1];
+    const daysInMonth = getDaysInMonth(month, year);
+    const dayNames = ['Do', 'Lu', 'Ma', 'Me', 'Gi', 'Ve', 'Sa'];
+    
+    let allData: { user: User; rows: TimesheetRow[] }[] = [];
+    
+    if (USE_LOCAL_DB) {
+      const timesheets = await LocalDB.getAllTimesheetsForMonth(year, month);
+      allData = timesheets.map(t => ({ user: t.user, rows: t.timesheet.rows }));
+    } else {
+      const usersRes = await fetch(`${API_URL}/api/users`);
+      const usersData = await usersRes.json();
+      
+      for (const user of usersData) {
+        try {
+          const tsRes = await fetch(`${API_URL}/api/timesheets/${user.id}/${year}/${month}`);
+          const tsData = await tsRes.json();
+          if (tsData.rows && tsData.rows.length > 0) {
+            allData.push({ user, rows: tsData.rows });
+          }
+        } catch (e) {
+          console.log('Error fetching timesheet for user:', user.name);
+        }
+      }
+    }
+    
+    if (allData.length === 0) {
+      return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:Arial;text-align:center;padding:50px;"><h1>Nessun dato</h1><p>Non ci sono dati per ${monthName} ${year}</p></body></html>`;
+    }
+    
+    let pagesHtml = '';
+    
+    for (const { user, rows } of allData) {
+      let dayNamesRow = '<th style="width:70px;background:#e0e0e0;padding:3px;font-size:7px;">COMMESSA</th>';
+      let dayNumbersRow = '<th style="background:#e0e0e0;"></th>';
+      
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = new Date(year, month - 1, d);
+        const dayOfWeek = date.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const color = isWeekend ? 'red' : 'black';
+        dayNamesRow += '<th style="width:20px;background:#e0e0e0;padding:2px;font-size:6px;color:' + color + ';">' + dayNames[dayOfWeek] + '</th>';
+        dayNumbersRow += '<th style="background:#e0e0e0;padding:2px;font-size:7px;color:' + color + ';">' + d.toString().padStart(2, '0') + '</th>';
+      }
+      dayNamesRow += '<th style="width:40px;background:#e0e0e0;padding:3px;font-size:7px;">Tot</th>';
+      dayNumbersRow += '<th style="background:#e0e0e0;"></th>';
+      
+      let dataRows = '';
+      let dailyTotals = new Array(daysInMonth).fill(0);
+      
+      for (const row of rows) {
+        const rowTotal = row.hours.slice(0, daysInMonth).reduce((sum, h) => sum + (h || 0), 0);
+        if (rowTotal === 0 || !row.commessa?.trim()) continue;
+        
+        let rowHtml = '<td style="text-align:center;padding:2px;font-size:6px;border:1px solid #ccc;">' + row.commessa + '</td>';
+        for (let d = 0; d < daysInMonth; d++) {
+          const hours = row.hours[d] || 0;
+          const display = hours > 0 ? hours.toString().replace('.', ',') : '';
+          rowHtml += '<td style="text-align:center;padding:1px;font-size:6px;border:1px solid #ccc;">' + display + '</td>';
+          dailyTotals[d] += hours;
+        }
+        rowHtml += '<td style="text-align:center;padding:2px;font-size:7px;font-weight:bold;border:1px solid #ccc;background:#f5f5f5;">' + (rowTotal > 0 ? rowTotal.toString().replace('.', ',') : '') + '</td>';
+        dataRows += '<tr>' + rowHtml + '</tr>';
+      }
+      
+      let totalsRow = '<td style="text-align:center;padding:2px;font-size:7px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">TOTALE</td>';
+      let grandTotal = 0;
+      for (let d = 0; d < daysInMonth; d++) {
+        const total = dailyTotals[d];
+        grandTotal += total;
+        totalsRow += '<td style="text-align:center;padding:1px;font-size:6px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">' + (total > 0 ? total.toString().replace('.', ',') : '') + '</td>';
+      }
+      totalsRow += '<td style="text-align:center;padding:2px;font-size:8px;font-weight:bold;background:#d0d0d0;border:1px solid #999;">' + (grandTotal > 0 ? grandTotal.toString().replace('.', ',') : '') + '</td>';
+      
+      pagesHtml += '<div style="page-break-after: always; margin-bottom: 20px;"><h2 style="text-align:center;font-size:14px;margin:5px 0;">' + user.name.toUpperCase() + '</h2><h3 style="text-align:center;font-size:11px;margin:5px 0 10px 0;color:red;">' + monthName + ' ' + year + '</h3><table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>' + dayNamesRow + '</tr><tr>' + dayNumbersRow + '</tr>' + dataRows + '<tr>' + totalsRow + '</tr></table></div>';
+    }
+    
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page { size: A4 landscape; margin: 8mm; } body { font-family: Arial, sans-serif; margin: 0; padding: 5px; } table { border: 1px solid #999; } th, td { border: 1px solid #999; }</style></head><body>' + pagesHtml + '</body></html>';
+  };
+
+  const handlePrintAll = async () => {
+    setPdfLoading(true);
+    try {
+      const html = await generateAllUsersHtml(printAllYear, printAllMonth);
+      const { uri } = await Print.printToFileAsync({ html, width: 842, height: 595 });
+      await Print.printAsync({ uri });
+      setShowPrintAllModal(false);
+    } catch (error) {
+      console.error('Error printing all:', error);
+      if (Platform.OS === 'web') {
+        alert('Errore durante la stampa');
+      } else {
+        Alert.alert('Errore', 'Errore durante la stampa');
+      }
     } finally {
       setPdfLoading(false);
     }
@@ -1518,6 +1622,15 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Riassunto</Text>
         </TouchableOpacity>
         
+        <TouchableOpacity style={styles.bottomButton} onPress={() => {
+          setPrintAllMonth(selectedMonth);
+          setPrintAllYear(selectedYear);
+          setShowPrintAllModal(true);
+        }} disabled={pdfLoading}>
+          <Ionicons name="documents" size={20} color="#673AB7" />
+          <Text style={styles.bottomButtonText}>Stampa Tutto</Text>
+        </TouchableOpacity>
+        
         {USE_LOCAL_DB ? (
           <>
             <TouchableOpacity style={styles.bottomButton} onPress={handleSaveBackup} disabled={pdfLoading}>
@@ -1943,6 +2056,79 @@ export default function TimesheetApp() {
               >
                 <Ionicons name="print" size={18} color="#fff" />
                 <Text style={styles.summaryButtonText}>Stampa</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Print All Modal */}
+      <Modal visible={showPrintAllModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowPrintAllModal(false)}
+          />
+          <View style={styles.summaryModalContent}>
+            <Text style={styles.modalTitle}>Stampa Tutti gli Utenti</Text>
+            <Text style={styles.summarySubtitle}>Un PDF con tutti i fogli ore del mese</Text>
+            
+            <View style={styles.summarySelectors}>
+              <View style={styles.summarySelector}>
+                <Text style={styles.summarySelectorLabel}>Mese</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {ITALIAN_MONTHS.map((month, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.summaryItem,
+                        printAllMonth === index + 1 && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setPrintAllMonth(index + 1)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        printAllMonth === index + 1 && styles.summaryItemTextSelected
+                      ]}>
+                        {month}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              
+              <View style={styles.summarySelector}>
+                <Text style={styles.summarySelectorLabel}>Anno</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {availableYears.map((year) => (
+                    <TouchableOpacity
+                      key={year}
+                      style={[
+                        styles.summaryItem,
+                        printAllYear === year && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setPrintAllYear(year)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        printAllYear === year && styles.summaryItemTextSelected
+                      ]}>
+                        {year}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+            
+            <View style={styles.summaryButtonsRow}>
+              <TouchableOpacity
+                style={[styles.summaryPrintButton, { backgroundColor: '#673AB7', flex: 1 }]}
+                onPress={handlePrintAll}
+              >
+                <Ionicons name="documents" size={18} color="#fff" />
+                <Text style={styles.summaryButtonText}>Stampa Tutto</Text>
               </TouchableOpacity>
             </View>
           </View>
