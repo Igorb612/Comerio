@@ -1128,31 +1128,48 @@ export default function TimesheetApp() {
     }
   };
 
-  // ========== BACKUP FUNCTIONS ==========
+  // ========== BACKUP FUNCTIONS (only for offline/native app) ==========
   const handleSaveBackup = async () => {
     setPdfLoading(true);
     try {
       const backupData = await LocalDB.exportAllData();
       const date = new Date().toISOString().split('T')[0];
       const filename = `backup_timesheet_${date}.json`;
-      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
       
-      await FileSystem.writeAsStringAsync(fileUri, backupData, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-      
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/json',
-          dialogTitle: 'Salva Backup Timesheet',
-        });
-        Alert.alert('Backup Salvato', 'Il backup è stato esportato. Salvalo in un posto sicuro!');
+      if (Platform.OS === 'web') {
+        // Web: download as file
+        const blob = new Blob([backupData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+        alert('Backup scaricato! Salvalo in un posto sicuro.');
       } else {
-        Alert.alert('Errore', 'La condivisione non è disponibile');
+        // Native: use FileSystem and Sharing
+        const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+        await FileSystem.writeAsStringAsync(fileUri, backupData, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/json',
+            dialogTitle: 'Salva Backup Timesheet',
+          });
+          Alert.alert('Backup Salvato', 'Il backup è stato esportato. Salvalo in un posto sicuro!');
+        } else {
+          Alert.alert('Errore', 'La condivisione non è disponibile');
+        }
       }
     } catch (error) {
       console.error('Error saving backup:', error);
-      Alert.alert('Errore', 'Errore durante il salvataggio del backup');
+      if (Platform.OS === 'web') {
+        alert('Errore durante il salvataggio del backup');
+      } else {
+        Alert.alert('Errore', 'Errore durante il salvataggio del backup');
+      }
     } finally {
       setPdfLoading(false);
     }
@@ -1160,36 +1177,69 @@ export default function TimesheetApp() {
 
   const handleLoadBackup = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
-        copyToCacheDirectory: true,
-      });
-      
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        return;
+      if (Platform.OS === 'web') {
+        // Web: use file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json,application/json';
+        input.onchange = async (e: any) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          
+          setPdfLoading(true);
+          try {
+            const content = await file.text();
+            const imported = await LocalDB.importAllData(content);
+            
+            await fetchUsers();
+            await fetchCommesse();
+            await fetchTimesheet();
+            
+            alert(`Backup Caricato!\n\nImportati:\n- ${imported.users} utenti\n- ${imported.commesse} commesse\n- ${imported.timesheets} fogli ore`);
+          } catch (err) {
+            console.error('Error importing:', err);
+            alert('Errore durante il caricamento del backup');
+          } finally {
+            setPdfLoading(false);
+          }
+        };
+        input.click();
+      } else {
+        // Native: use DocumentPicker
+        const result = await DocumentPicker.getDocumentAsync({
+          type: 'application/json',
+          copyToCacheDirectory: true,
+        });
+        
+        if (result.canceled || !result.assets || result.assets.length === 0) {
+          return;
+        }
+        
+        const file = result.assets[0];
+        setPdfLoading(true);
+        
+        const content = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        
+        const imported = await LocalDB.importAllData(content);
+        
+        await fetchUsers();
+        await fetchCommesse();
+        await fetchTimesheet();
+        
+        Alert.alert(
+          'Backup Caricato',
+          `Importati:\n- ${imported.users} utenti\n- ${imported.commesse} commesse\n- ${imported.timesheets} fogli ore`
+        );
       }
-      
-      const file = result.assets[0];
-      setPdfLoading(true);
-      
-      const content = await FileSystem.readAsStringAsync(file.uri, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-      
-      const imported = await LocalDB.importAllData(content);
-      
-      // Refresh data
-      await fetchUsers();
-      await fetchCommesse();
-      await fetchTimesheet();
-      
-      Alert.alert(
-        'Backup Caricato',
-        `Importati:\n- ${imported.users} utenti\n- ${imported.commesse} commesse\n- ${imported.timesheets} fogli ore`
-      );
     } catch (error) {
       console.error('Error loading backup:', error);
-      Alert.alert('Errore', 'Errore durante il caricamento del backup. Verifica che il file sia valido.');
+      if (Platform.OS === 'web') {
+        alert('Errore durante il caricamento del backup. Verifica che il file sia valido.');
+      } else {
+        Alert.alert('Errore', 'Errore durante il caricamento del backup. Verifica che il file sia valido.');
+      }
     } finally {
       setPdfLoading(false);
     }
