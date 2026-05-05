@@ -1236,7 +1236,10 @@ export default function TimesheetApp() {
   const handleSaveBackup = async () => {
     setPdfLoading(true);
     try {
+      console.log('[Backup] Starting export...');
       const backupData = await LocalDB.exportAllData();
+      console.log('[Backup] Data exported, length:', backupData.length);
+      
       const date = new Date().toISOString().split('T')[0];
       const filename = `backup_timesheet_${date}.json`;
       
@@ -1252,27 +1255,40 @@ export default function TimesheetApp() {
         alert('Backup scaricato! Salvalo in un posto sicuro.');
       } else {
         // Native: use FileSystem and Sharing
-        const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+        const directory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+        if (!directory) {
+          Alert.alert('Errore', 'Directory non disponibile');
+          return;
+        }
+        
+        const fileUri = `${directory}${filename}`;
+        console.log('[Backup] Writing to:', fileUri);
+        
         await FileSystem.writeAsStringAsync(fileUri, backupData, {
           encoding: FileSystem.EncodingType.UTF8,
         });
+        console.log('[Backup] File written successfully');
         
-        if (await Sharing.isAvailableAsync()) {
+        const isAvailable = await Sharing.isAvailableAsync();
+        console.log('[Backup] Sharing available:', isAvailable);
+        
+        if (isAvailable) {
           await Sharing.shareAsync(fileUri, {
             mimeType: 'application/json',
             dialogTitle: 'Salva Backup Timesheet',
+            UTI: 'public.json',
           });
-          Alert.alert('Backup Salvato', 'Il backup è stato esportato. Salvalo in un posto sicuro!');
         } else {
-          Alert.alert('Errore', 'La condivisione non è disponibile');
+          // Fallback: save to downloads
+          Alert.alert('Backup Salvato', `File salvato in: ${fileUri}`);
         }
       }
-    } catch (error) {
-      console.error('Error saving backup:', error);
+    } catch (error: any) {
+      console.error('[Backup] Error:', error);
       if (Platform.OS === 'web') {
-        alert('Errore durante il salvataggio del backup');
+        alert('Errore durante il salvataggio del backup: ' + error.message);
       } else {
-        Alert.alert('Errore', 'Errore durante il salvataggio del backup');
+        Alert.alert('Errore', 'Errore durante il salvataggio: ' + (error.message || 'Errore sconosciuto'));
       }
     } finally {
       setPdfLoading(false);
