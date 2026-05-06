@@ -1321,39 +1321,49 @@ export default function TimesheetApp() {
     try {
       const backupData = await LocalDB.exportAllData();
       const date = new Date().toISOString().split('T')[0];
+      const timestamp = Date.now();
       
       if (Platform.OS === 'web') {
         const blob = new Blob([backupData], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `backup_${date}.json`;
+        link.download = `backup_comerio_${date}.json`;
         link.click();
         URL.revokeObjectURL(url);
         alert('Backup scaricato!');
       } else {
-        // Android: crea un PDF con i dati del backup
-        const html = `
-          <!DOCTYPE html>
-          <html>
-          <head><meta charset="UTF-8"><title>Backup Timesheet</title></head>
-          <body style="font-family:monospace;font-size:8pt;white-space:pre-wrap;word-wrap:break-word;">
-            <h2>Backup Timesheet - ${date}</h2>
-            <p>Salva questo file o fai uno screenshot per conservare i tuoi dati.</p>
-            <hr/>
-            <code>${backupData.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>
-          </body>
-          </html>
-        `;
+        // Android: salva come file JSON e condividi
+        const filename = `backup_comerio_${date}_${timestamp}.json`;
+        const fileUri = FileSystem.cacheDirectory + filename;
         
-        const { uri } = await Print.printToFileAsync({ html });
-        
-        await Sharing.shareAsync(uri, {
-          mimeType: 'application/pdf',
+        // Scrivi il file JSON nella cache
+        await FileSystem.writeAsStringAsync(fileUri, backupData, {
+          encoding: FileSystem.EncodingType.UTF8,
         });
+        
+        // Verifica che il file sia stato creato
+        const fileInfo = await FileSystem.getInfoAsync(fileUri);
+        if (!fileInfo.exists) {
+          throw new Error('File non creato correttamente');
+        }
+        
+        // Condividi il file JSON
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/json',
+            dialogTitle: 'Salva Backup Database',
+            UTI: 'public.json',
+          });
+          
+          Alert.alert('Successo', 'Backup pronto per essere salvato. Scegli dove salvarlo (Google Drive, File, ecc.)');
+        } else {
+          Alert.alert('Errore', 'Condivisione non disponibile su questo dispositivo');
+        }
       }
     } catch (error: any) {
-      Alert.alert('Errore', 'Impossibile creare backup: ' + String(error));
+      console.error('Errore backup:', error);
+      Alert.alert('Errore', 'Impossibile creare backup: ' + String(error?.message || error));
     } finally {
       setPdfLoading(false);
     }
