@@ -1236,15 +1236,11 @@ export default function TimesheetApp() {
   const handleSaveBackup = async () => {
     setPdfLoading(true);
     try {
-      console.log('[Backup] Starting export...');
       const backupData = await LocalDB.exportAllData();
-      console.log('[Backup] Data exported, length:', backupData.length);
-      
       const date = new Date().toISOString().split('T')[0];
       const filename = `backup_timesheet_${date}.json`;
       
       if (Platform.OS === 'web') {
-        // Web: download as file
         const blob = new Blob([backupData], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -1252,48 +1248,27 @@ export default function TimesheetApp() {
         link.download = filename;
         link.click();
         URL.revokeObjectURL(url);
-        alert('Backup scaricato! Salvalo in un posto sicuro.');
+        alert('Backup scaricato!');
       } else {
-        // Android: usa StorageAccessFramework per far scegliere all'utente dove salvare
-        try {
-          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        // Android: usa StorageAccessFramework
+        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        
+        if (permissions.granted) {
+          const uri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            filename,
+            'application/json'
+          );
           
-          if (permissions.granted) {
-            const uri = await FileSystem.StorageAccessFramework.createFileAsync(
-              permissions.directoryUri,
-              filename,
-              'application/json'
-            );
-            
-            await FileSystem.writeAsStringAsync(uri, backupData, {
-              encoding: FileSystem.EncodingType.UTF8,
-            });
-            
-            Alert.alert('Backup Salvato!', 'Il file è stato salvato nella cartella che hai scelto.');
-          } else {
-            Alert.alert('Permesso negato', 'Devi permettere l\'accesso alla cartella per salvare il backup.');
-          }
-        } catch (safError: any) {
-          console.log('[Backup] SAF error, trying sharing:', safError);
-          // Fallback: prova con sharing
-          const tempUri = FileSystem.cacheDirectory + filename;
-          await FileSystem.writeAsStringAsync(tempUri, backupData, {
-            encoding: FileSystem.EncodingType.UTF8,
-          });
-          
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(tempUri, {
-              mimeType: 'application/json',
-              dialogTitle: 'Salva Backup',
-            });
-          } else {
-            Alert.alert('Errore', 'Impossibile salvare il backup');
-          }
+          await FileSystem.writeAsStringAsync(uri, backupData);
+          Alert.alert('Backup Salvato!', 'File salvato nella cartella scelta.');
+        } else {
+          Alert.alert('Permesso negato', 'Devi permettere l\'accesso alla cartella.');
         }
       }
     } catch (error: any) {
       console.error('[Backup] Error:', error);
-      Alert.alert('Errore', 'Errore: ' + (error.message || 'Errore sconosciuto'));
+      Alert.alert('Errore', error.message || 'Errore sconosciuto');
     } finally {
       setPdfLoading(false);
     }
