@@ -1333,25 +1333,30 @@ export default function TimesheetApp() {
         URL.revokeObjectURL(url);
         alert('Backup scaricato!');
       } else {
-        // Android: usa StorageAccessFramework
-        const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        // Android: usa Print per creare un "PDF" con i dati JSON
+        // Poi lo condividi
+        const tempDir = FileSystem.documentDirectory || FileSystem.cacheDirectory || '';
+        if (!tempDir) {
+          // Fallback: mostra i dati in un alert
+          Alert.alert('Backup', 'Copia questi dati:\n\n' + backupData.substring(0, 500) + '...');
+          return;
+        }
         
-        if (permissions.granted) {
-          const uri = await FileSystem.StorageAccessFramework.createFileAsync(
-            permissions.directoryUri,
-            filename,
-            'application/json'
-          );
-          
-          await FileSystem.writeAsStringAsync(uri, backupData);
-          Alert.alert('Backup Salvato!', 'File salvato nella cartella scelta.');
+        const fileUri = tempDir + filename;
+        await FileSystem.writeAsStringAsync(fileUri, backupData);
+        
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'application/json',
+          });
         } else {
-          Alert.alert('Permesso negato', 'Devi permettere l\'accesso alla cartella.');
+          Alert.alert('Backup creato', 'File salvato in: ' + fileUri);
         }
       }
     } catch (error: any) {
       console.error('[Backup] Error:', error);
-      Alert.alert('Errore', error.message || 'Errore sconosciuto');
+      Alert.alert('Errore Backup', String(error));
     } finally {
       setPdfLoading(false);
     }
