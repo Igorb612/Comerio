@@ -19,8 +19,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
-import * as DocumentPicker from 'expo-document-picker';
 import * as LocalDB from '../src/utils/localDatabase';
 
 const LOGO_URL = 'https://customer-assets.emergentagent.com/job_monthly-hours-log/artifacts/iyhrh1bv_2et8lmtm_COMERIO-logo-600x195.png';
@@ -1316,129 +1314,6 @@ export default function TimesheetApp() {
   };
 
   // ========== BACKUP FUNCTIONS (only for offline/native app) ==========
-  const handleSaveBackup = async () => {
-    setPdfLoading(true);
-    try {
-      const backupData = await LocalDB.exportAllData();
-      const date = new Date().toISOString().split('T')[0];
-      const timestamp = Date.now();
-      
-      if (Platform.OS === 'web') {
-        const blob = new Blob([backupData], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `backup_comerio_${date}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
-        alert('Backup scaricato!');
-      } else {
-        // Android: salva come file JSON e condividi
-        const filename = `backup_comerio_${date}_${timestamp}.json`;
-        const fileUri = FileSystem.cacheDirectory + filename;
-        
-        // Scrivi il file JSON nella cache
-        await FileSystem.writeAsStringAsync(fileUri, backupData, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-        
-        // Verifica che il file sia stato creato
-        const fileInfo = await FileSystem.getInfoAsync(fileUri);
-        if (!fileInfo.exists) {
-          throw new Error('File non creato correttamente');
-        }
-        
-        // Condividi il file JSON
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: 'application/json',
-            dialogTitle: 'Salva Backup Database',
-            UTI: 'public.json',
-          });
-          
-          Alert.alert('Successo', 'Backup pronto per essere salvato. Scegli dove salvarlo (Google Drive, File, ecc.)');
-        } else {
-          Alert.alert('Errore', 'Condivisione non disponibile su questo dispositivo');
-        }
-      }
-    } catch (error: any) {
-      console.error('Errore backup:', error);
-      Alert.alert('Errore', 'Impossibile creare backup: ' + String(error?.message || error));
-    } finally {
-      setPdfLoading(false);
-    }
-  };
-
-  const handleLoadBackup = async () => {
-    try {
-      if (Platform.OS === 'web') {
-        // Web: use file input
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json,application/json';
-        input.onchange = async (e: any) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          
-          setPdfLoading(true);
-          try {
-            const content = await file.text();
-            const imported = await LocalDB.importAllData(content);
-            
-            await fetchUsers();
-            await fetchCommesse();
-            await fetchTimesheet();
-            
-            alert(`Backup Caricato!\n\nImportati:\n- ${imported.users} utenti\n- ${imported.commesse} commesse\n- ${imported.timesheets} fogli ore`);
-          } catch (err) {
-            console.error('Error importing:', err);
-            alert('Errore durante il caricamento del backup');
-          } finally {
-            setPdfLoading(false);
-          }
-        };
-        input.click();
-      } else {
-        // Native: use DocumentPicker
-        const result = await DocumentPicker.getDocumentAsync({
-          type: 'application/json',
-          copyToCacheDirectory: true,
-        });
-        
-        if (result.canceled || !result.assets || result.assets.length === 0) {
-          return;
-        }
-        
-        const file = result.assets[0];
-        setPdfLoading(true);
-        
-        const content = await FileSystem.readAsStringAsync(file.uri, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-        
-        const imported = await LocalDB.importAllData(content);
-        
-        await fetchUsers();
-        await fetchCommesse();
-        await fetchTimesheet();
-        
-        Alert.alert(
-          'Backup Caricato',
-          `Importati:\n- ${imported.users} utenti\n- ${imported.commesse} commesse\n- ${imported.timesheets} fogli ore`
-        );
-      }
-    } catch (error) {
-      console.error('Error loading backup:', error);
-      if (Platform.OS === 'web') {
-        alert('Errore durante il caricamento del backup. Verifica che il file sia valido.');
-      } else {
-        Alert.alert('Errore', 'Errore durante il caricamento del backup. Verifica che il file sia valido.');
-      }
-    } finally {
-      setPdfLoading(false);
-    }
-  };
-
   const selectCommessa = (commessa: string) => {
     setSelectedCommessa(commessa);
     setShowCommessaPicker(false);
@@ -1731,19 +1606,7 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Per Commessa</Text>
         </TouchableOpacity>
         
-        {USE_LOCAL_DB ? (
-          <>
-            <TouchableOpacity style={styles.bottomButton} onPress={handleSaveBackup} disabled={pdfLoading}>
-              <Ionicons name="cloud-upload" size={20} color="#4CAF50" />
-              <Text style={styles.bottomButtonText}>Salva Backup</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.bottomButton} onPress={handleLoadBackup} disabled={pdfLoading}>
-              <Ionicons name="cloud-download" size={20} color="#FF9800" />
-              <Text style={styles.bottomButtonText}>Carica Backup</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
+        {!USE_LOCAL_DB && (
           <>
             <TouchableOpacity style={styles.bottomButton} onPress={handleShareWhatsApp} disabled={pdfLoading}>
               <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
