@@ -1321,42 +1321,39 @@ export default function TimesheetApp() {
     try {
       const backupData = await LocalDB.exportAllData();
       const date = new Date().toISOString().split('T')[0];
-      const filename = `backup_timesheet_${date}.json`;
       
       if (Platform.OS === 'web') {
         const blob = new Blob([backupData], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename;
+        link.download = `backup_${date}.json`;
         link.click();
         URL.revokeObjectURL(url);
         alert('Backup scaricato!');
       } else {
-        // Android: usa Print per creare un "PDF" con i dati JSON
-        // Poi lo condividi
-        const tempDir = FileSystem.documentDirectory || FileSystem.cacheDirectory || '';
-        if (!tempDir) {
-          // Fallback: mostra i dati in un alert
-          Alert.alert('Backup', 'Copia questi dati:\n\n' + backupData.substring(0, 500) + '...');
-          return;
-        }
+        // Android: crea un PDF con i dati del backup
+        const html = `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="UTF-8"><title>Backup Timesheet</title></head>
+          <body style="font-family:monospace;font-size:8pt;white-space:pre-wrap;word-wrap:break-word;">
+            <h2>Backup Timesheet - ${date}</h2>
+            <p>Salva questo file o fai uno screenshot per conservare i tuoi dati.</p>
+            <hr/>
+            <code>${backupData.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>
+          </body>
+          </html>
+        `;
         
-        const fileUri = tempDir + filename;
-        await FileSystem.writeAsStringAsync(fileUri, backupData);
+        const { uri } = await Print.printToFileAsync({ html });
         
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: 'application/json',
-          });
-        } else {
-          Alert.alert('Backup creato', 'File salvato in: ' + fileUri);
-        }
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+        });
       }
     } catch (error: any) {
-      console.error('[Backup] Error:', error);
-      Alert.alert('Errore Backup', String(error));
+      Alert.alert('Errore', 'Impossibile creare backup: ' + String(error));
     } finally {
       setPdfLoading(false);
     }
