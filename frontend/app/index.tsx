@@ -110,6 +110,10 @@ export default function TimesheetApp() {
   const [showPrintAllModal, setShowPrintAllModal] = useState(false);
   const [printAllMonth, setPrintAllMonth] = useState<number>(new Date().getMonth() + 1);
   const [printAllYear, setPrintAllYear] = useState<number>(new Date().getFullYear());
+  const [showCommessaSummaryModal, setShowCommessaSummaryModal] = useState(false);
+  const [commessaSummaryMonth, setCommessaSummaryMonth] = useState<number>(new Date().getMonth() + 1);
+  const [commessaSummaryYear, setCommessaSummaryYear] = useState<number>(new Date().getFullYear());
+  const [selectedCommessaForSummary, setSelectedCommessaForSummary] = useState<string>('');
 
   // User state
   const [users, setUsers] = useState<User[]>([]);
@@ -880,6 +884,85 @@ export default function TimesheetApp() {
     }
   };
 
+  // ========== COMMESSA SUMMARY FUNCTIONS ==========
+  const generateCommessaSummaryHtml = async (commessaName: string, year: number, month: number): Promise<string> => {
+    const monthName = ITALIAN_MONTHS[month - 1];
+    const daysInMonth = getDaysInMonth(month, year);
+    
+    let userHours: { name: string; hours: number }[] = [];
+    let totalHours = 0;
+    
+    if (USE_LOCAL_DB) {
+      const allTimesheets = await LocalDB.getAllTimesheetsForMonth(year, month);
+      for (const { user, timesheet } of allTimesheets) {
+        let userTotal = 0;
+        for (const row of timesheet.rows) {
+          if (row.commessa === commessaName) {
+            userTotal += row.hours.slice(0, daysInMonth).reduce((sum, h) => sum + (h || 0), 0);
+          }
+        }
+        if (userTotal > 0) {
+          userHours.push({ name: user.name, hours: userTotal });
+          totalHours += userTotal;
+        }
+      }
+    } else {
+      const usersRes = await fetch(`${API_URL}/api/users`);
+      const usersData = await usersRes.json();
+      
+      for (const user of usersData) {
+        try {
+          const tsRes = await fetch(`${API_URL}/api/timesheets/${user.id}/${year}/${month}`);
+          const tsData = await tsRes.json();
+          if (tsData.rows) {
+            let userTotal = 0;
+            for (const row of tsData.rows) {
+              if (row.commessa === commessaName) {
+                userTotal += row.hours.slice(0, daysInMonth).reduce((sum: number, h: number) => sum + (h || 0), 0);
+              }
+            }
+            if (userTotal > 0) {
+              userHours.push({ name: user.name, hours: userTotal });
+              totalHours += userTotal;
+            }
+          }
+        } catch (e) {}
+      }
+    }
+    
+    if (userHours.length === 0) {
+      return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="font-family:Arial;text-align:center;padding:50px;"><h1>Nessun dato</h1><p>Nessuna ora registrata per "${commessaName}" in ${monthName} ${year}</p></body></html>`;
+    }
+    
+    userHours.sort((a, b) => a.name.localeCompare(b.name));
+    
+    let tableRows = '';
+    for (const { name, hours } of userHours) {
+      tableRows += '<tr><td style="padding:12px 15px;border:1px solid #e0e0e0;font-size:12pt;">' + name + '</td><td style="padding:12px 15px;border:1px solid #e0e0e0;text-align:center;font-size:12pt;font-weight:bold;">' + hours.toString().replace('.', ',') + '</td></tr>';
+    }
+    
+    return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page { size: A4 portrait; margin: 15mm; } body { font-family: Arial; padding: 20px; } .header { text-align: center; margin-bottom: 30px; } h1 { color: #1565C0; font-size: 22pt; margin: 10px 0; } h2 { color: #333; font-size: 16pt; margin: 5px 0; } h3 { color: #1565C0; font-size: 14pt; margin: 15px 0; } table { width: 100%; border-collapse: collapse; border: 2px solid #1565C0; } th { background: #1565C0; color: white; padding: 12px 15px; font-size: 12pt; } .total td { background: #0D47A1; color: white; font-weight: bold; font-size: 14pt; padding: 12px 15px; } .footer { margin-top: 25px; text-align: center; color: #999; font-size: 9pt; }</style></head><body><div class="header"><h1>RIASSUNTO COMMESSA</h1><h2>' + commessaName + '</h2><h3>' + monthName + ' ' + year + '</h3></div><table><thead><tr><th style="text-align:left;">DIPENDENTE</th><th style="width:120px;">ORE</th></tr></thead><tbody>' + tableRows + '<tr class="total"><td>TOTALE</td><td style="text-align:center;">' + totalHours.toString().replace('.', ',') + '</td></tr></tbody></table><div class="footer">Generato il ' + new Date().toLocaleDateString('it-IT') + '</div></body></html>';
+  };
+
+  const handlePrintCommessaSummary = async () => {
+    if (!selectedCommessaForSummary) {
+      Alert.alert('Attenzione', 'Seleziona una commessa');
+      return;
+    }
+    setPdfLoading(true);
+    try {
+      const html = await generateCommessaSummaryHtml(selectedCommessaForSummary, commessaSummaryYear, commessaSummaryMonth);
+      const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+      await Print.printAsync({ uri });
+      setShowCommessaSummaryModal(false);
+    } catch (error) {
+      console.error('Error printing commessa summary:', error);
+      Alert.alert('Errore', 'Errore durante la stampa');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   // Generate HTML table for PDF
   const generatePdfHtml = () => {
     const daysInMonth = getDaysInMonth(selectedMonth, selectedYear);
@@ -1626,6 +1709,16 @@ export default function TimesheetApp() {
           <Text style={styles.bottomButtonText}>Stampa Tutto</Text>
         </TouchableOpacity>
         
+        <TouchableOpacity style={styles.bottomButton} onPress={() => {
+          setCommessaSummaryMonth(selectedMonth);
+          setCommessaSummaryYear(selectedYear);
+          setSelectedCommessaForSummary(commesse.length > 0 ? commesse[0].name : '');
+          setShowCommessaSummaryModal(true);
+        }} disabled={pdfLoading}>
+          <Ionicons name="briefcase" size={20} color="#1565C0" />
+          <Text style={styles.bottomButtonText}>Per Commessa</Text>
+        </TouchableOpacity>
+        
         {USE_LOCAL_DB ? (
           <>
             <TouchableOpacity style={styles.bottomButton} onPress={handleSaveBackup} disabled={pdfLoading}>
@@ -2124,6 +2217,102 @@ export default function TimesheetApp() {
               >
                 <Ionicons name="documents" size={18} color="#fff" />
                 <Text style={styles.summaryButtonText}>Stampa Tutto</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Commessa Summary Modal */}
+      <Modal visible={showCommessaSummaryModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowCommessaSummaryModal(false)}
+          />
+          <View style={styles.summaryModalContent}>
+            <Text style={styles.modalTitle}>Riassunto per Commessa</Text>
+            <Text style={styles.summarySubtitle}>Ore totali di tutti gli utenti per una commessa</Text>
+            
+            <View style={styles.summarySelectors}>
+              <View style={[styles.summarySelector, { flex: 2 }]}>
+                <Text style={styles.summarySelectorLabel}>Commessa</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {commesse.map((c) => (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[
+                        styles.summaryItem,
+                        selectedCommessaForSummary === c.name && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setSelectedCommessaForSummary(c.name)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        selectedCommessaForSummary === c.name && styles.summaryItemTextSelected
+                      ]}>
+                        {c.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              
+              <View style={styles.summarySelector}>
+                <Text style={styles.summarySelectorLabel}>Mese</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {ITALIAN_MONTHS.map((month, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.summaryItem,
+                        commessaSummaryMonth === index + 1 && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setCommessaSummaryMonth(index + 1)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        commessaSummaryMonth === index + 1 && styles.summaryItemTextSelected
+                      ]}>
+                        {month.substring(0, 3)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+              
+              <View style={[styles.summarySelector, { flex: 0.7 }]}>
+                <Text style={styles.summarySelectorLabel}>Anno</Text>
+                <ScrollView style={styles.summaryScrollList}>
+                  {availableYears.map((year) => (
+                    <TouchableOpacity
+                      key={year}
+                      style={[
+                        styles.summaryItem,
+                        commessaSummaryYear === year && styles.summaryItemSelected
+                      ]}
+                      onPress={() => setCommessaSummaryYear(year)}
+                    >
+                      <Text style={[
+                        styles.summaryItemText,
+                        commessaSummaryYear === year && styles.summaryItemTextSelected
+                      ]}>
+                        {year}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+            
+            <View style={styles.summaryButtonsRow}>
+              <TouchableOpacity
+                style={[styles.summaryPrintButton, { backgroundColor: '#1565C0', flex: 1 }]}
+                onPress={handlePrintCommessaSummary}
+              >
+                <Ionicons name="briefcase" size={18} color="#fff" />
+                <Text style={styles.summaryButtonText}>Stampa Riassunto</Text>
               </TouchableOpacity>
             </View>
           </View>
